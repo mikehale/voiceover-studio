@@ -62,7 +62,7 @@ label.chk{display:flex;gap:6px;align-items:center}pre{white-space:pre-wrap;font:
    <button class="pri" onclick="addUrls()">Add to queue</button>
    <button onclick="addFiles()">Add local videos…</button>
    <label class="chk" id="addCloneL" title="Install cloned voices in Settings > Voices to use this"><input type="checkbox" id="addClone" onchange="accentUI()">Use cloned voices</label>
-   <select id="addAccent" title="Accent of the cloned voices"><option value="original">Original accent</option><option value="german">German accent</option></select>
+   <select id="addAccent" title="Accent of the cloned voices" onchange="accentPicked()"><option value="original">Original accent</option><option value="german">German accent</option></select>
    <span class="grow"></span>
    <span class="mut">Only process</span><input id="rStart" placeholder="start (e.g. 4:20)" size="11"><span class="mut">to</span><input id="rEnd" placeholder="end (optional)" size="11">
   </div>
@@ -90,8 +90,8 @@ label.chk{display:flex;gap:6px;align-items:center}pre{white-space:pre-wrap;font:
   <div>Narrator voice (cyan)</div><select id="s_voice_narrator"></select>
   <div>Song lyrics (white)</div><select id="s_voice_lyrics"></select>
   <div>Cloned voices</div><div id="cloneBox"></div>
-  <div></div><label class="chk" id="cloneDefL"><input type="checkbox" id="s_clone_default">Use cloned voices for new videos by default</label>
-  <div style="align-self:start;padding-top:7px">Accent of cloned voices</div><div><div class="row"><select id="s_clone_accent"><option value="original">Original (as the actors sound)</option><option value="german">German</option></select><span class="sub">default for new videos; only applies with cloned voices</span></div><div id="deBox"></div></div>
+  <div></div><label class="chk" id="cloneDefL"><input type="checkbox" id="s_clone_default" onchange="liveCloneDefaults()">Use cloned voices for new videos by default</label>
+  <div style="align-self:start;padding-top:7px">Accent of cloned voices</div><div><div class="row"><select id="s_clone_accent" onchange="liveCloneDefaults()"><option value="original">Original (as the actors sound)</option><option value="german">German</option></select><span class="sub">default for new videos; only applies with cloned voices</span></div><div id="deBox"></div></div>
   <div></div><div class="sub wrap">Cloned voices speak the English lines in the voices of the original actors (Chatterbox, runs locally). Speakers are grouped automatically from the Japanese audio; the narrator gets its own voice. Much slower than the standard voices. Any line that can't be cloned uses the standard voice above. The German accent reads the English lines with a German accent (Chatterbox Multilingual, about 20% slower, somewhat less clear); lines it can't do use the original-accent clone.</div>
   <div>Subtitle corrections</div><div class="row"><button onclick="native('openPath',{path:DATA+'/corrections.json',text:true})">Edit corrections…</button><span class="sub">find/replace rules applied after OCR</span></div>
  </div></section>
@@ -131,7 +131,9 @@ window.__nativeReply=(id,val)=>{if(pend[id]){pend[id](val);delete pend[id]}};
 function range(){return{start:document.getElementById('rStart').value.trim(),end:document.getElementById('rEnd').value.trim()}}
 function cloneOn(){const c=document.getElementById('addClone');return !c.disabled&&c.checked}
 function addAccent(){return cloneOn()?document.getElementById('addAccent').value:'original'}
-function accentUI(){const a=document.getElementById('addAccent');a.disabled=!cloneOn();a.style.opacity=cloneOn()?1:.45}
+// the accent picker stays usable once cloned voices are installed; choosing German turns on "Use cloned voices"
+function accentUI(){const a=document.getElementById('addAccent');a.disabled=document.getElementById('addClone').disabled;a.style.opacity=cloneOn()?1:.45}
+function accentPicked(){const c=document.getElementById('addClone');if(document.getElementById('addAccent').value==='german'&&!c.disabled)c.checked=true;accentUI()}
 async function addUrls(){const t=document.getElementById('urls').value;if(!t.trim())return;const r=await post('/api/add',Object.assign({text:t,clone:cloneOn(),accent:addAccent()},range()));if(r.added){document.getElementById('urls').value='';toast(`Added ${r.added} item(s)`)}else toast('No URLs or files found')}
 async function addFiles(){const paths=await native('pickFiles');if(paths&&paths.length)post('/api/add_files',Object.assign({paths,clone:cloneOn(),accent:addAccent()},range()))}
 async function pickFolder(){const p=await native('pickFolder');if(p)document.getElementById('s_output_dir').value=p}
@@ -158,7 +160,11 @@ function renderSetup(st){
  return `<div class="step"><div class="ico">${ico}</div><div><div>${esc(s.label)}</div>${s.state==='running'?`<div class="bar"><i style="width:${s.pct==null?100:s.pct}%;${s.pct==null?'opacity:.35':''}"></i></div><div class="sub">${esc(s.detail||'')}</div>`:''}</div></div>`}).join('');
  document.getElementById('setupErr').textContent=st.error||'';document.getElementById('setupRetry').style.display=st.state==='error'?'':'none'}
 function gb(b){return (b/1e9).toFixed(1)+' GB'}
-let cloneDefSeen=null,accentSeen=null;
+let cloneDefSeen=null,accentSeen=null,mainBefore=null;
+// Settings > Voices choices show up on the main add row right away (Save still stores them as the default; Cancel undoes)
+function liveCloneDefaults(){if(!(S&&S.clone&&S.clone.state==='ready'))return;
+ document.getElementById('addClone').checked=document.getElementById('s_clone_default').checked;
+ document.getElementById('addAccent').value=document.getElementById('s_clone_accent').value;accentUI();if(S)renderClone(S)}
 function renderClone(s){const c=s.clone||{state:'absent'};const ready=c.state==='ready',busy=c.state==='installing'||c.state==='removing';
  const ac=document.getElementById('addClone');ac.disabled=!ready;document.getElementById('addCloneL').style.opacity=ready?1:.45;
  document.getElementById('addCloneL').title=ready?'Voice new videos in the original actors\' voices (much slower)':'Install cloned voices in Settings > Voices to use this';
@@ -171,7 +177,7 @@ function renderClone(s){const c=s.clone||{state:'absent'};const ready=c.state===
  if(!ready)dh='';
  else if(de.state==='ready')dh=`<div class="sub">German-accent model installed (${gb(de.size||0)})</div>`;
  else if(de.state==='installing')dh=`<div class="sub">Installing the German-accent model…</div><div class="bar"><i style="width:${de.pct==null?100:de.pct}%;${de.pct==null?'opacity:.35':''}"></i></div><div class="sub wrap">${esc(de.detail||'')}</div>`;
- else dh=`<div class="row"><span class="sub">German accent needs a one-time ${gb(de.size||2144059741)} download (it starts by itself the first time you choose German).</span><button class="sm" onclick="post('/api/clone/install_de').then(r=>{if(!r.error)toast('Downloading the German-accent model in the background')})">${de.state==='error'?'Retry download':'Download now'}</button></div>${de.state==='error'?`<div class="sub wrap" style="color:var(--err)">${esc(de.error||'download failed')} <a href="#" onclick="native('openPath',{path:DATA+'/logs/clone_setup.log'});return false">log</a></div>`:''}`;
+ else dh=`<div class="row"><span class="sub">${document.getElementById('s_clone_accent').value==='german'&&s.settings.clone_accent!=='german'?`German selected: the one-time ${gb(de.size||2144059741)} German-accent download starts when you click Save.`:`German accent needs a one-time ${gb(de.size||2144059741)} download (it starts by itself when you save German as the default or add a video with German).`}</span><button class="sm" onclick="post('/api/clone/install_de').then(r=>{if(!r.error)toast('Downloading the German-accent model in the background')})">${de.state==='error'?'Retry download':'Download now'}</button></div>${de.state==='error'?`<div class="sub wrap" style="color:var(--err)">${esc(de.error||'download failed')} <a href="#" onclick="native('openPath',{path:DATA+'/logs/clone_setup.log'});return false">log</a></div>`:''}`;
  const db_=document.getElementById('deBox');if(db_._h!==dh){db_.innerHTML=dh;db_._h=dh}
  const op=document.getElementById('optin');op.checked=!!s.settings.clone_optin||busy||ready;op.disabled=busy||ready;
  document.getElementById('s_clone_default').disabled=!ready;document.getElementById('cloneDefL').style.opacity=ready?1:.45;
@@ -190,14 +196,14 @@ async function refresh(){try{const s=await api('/api/state');S=s;DATA=s.data_dir
 function fillVoices(id,extra){const el=document.getElementById(id);el.innerHTML=(extra||'')+VOICES.map(v=>`<option value="${v[0]}">${v[1]}</option>`).join('')}
 fillVoices('s_voice_dialogue');fillVoices('s_voice_narrator');fillVoices('s_voice_lyrics','<option value="skip">Don\'t voice (recommended)</option>');
 const FIELDS=['output_dir','voice_dialogue','voice_narrator','voice_lyrics','jp_db','duck_db','tts_db','video_codec','max_height','cookies','keep_source','clone_default','clone_accent'];
-function openSettings(){const s=S.settings;for(const f of FIELDS){const el=document.getElementById('s_'+f);if(el.type==='checkbox')el.checked=!!s[f];else el.value=s[f]}
+function openSettings(){const s=S.settings;mainBefore={clone:document.getElementById('addClone').checked,accent:document.getElementById('addAccent').value};for(const f of FIELDS){const el=document.getElementById('s_'+f);if(el.type==='checkbox')el.checked=!!s[f];else el.value=s[f]}
  for(const f of['jp_db','duck_db','tts_db'])upd(f);document.getElementById('ver').textContent='Version '+S.version;show('settings')}
 function upd(f){const v=document.getElementById('s_'+f).value;document.getElementById('v_'+f).textContent=(f==='jp_db'&&Number(v)<=-41)?'Off':v+' dB';
  if(f==='jp_db'){const d=document.getElementById('s_duck_db');d.disabled=Number(v)<=-41;d.parentElement.style.opacity=d.disabled?.45:1}}
 for(const f of['jp_db','duck_db','tts_db'])document.getElementById('s_'+f).oninput=()=>upd(f);
-function closeSettings(){hide('settings')}
+function closeSettings(){if(mainBefore){document.getElementById('addClone').checked=mainBefore.clone;document.getElementById('addAccent').value=mainBefore.accent;accentUI();mainBefore=null}hide('settings')}
 async function saveSettings(){const b={};for(const f of FIELDS){const el=document.getElementById('s_'+f);b[f]=el.type==='checkbox'?el.checked:(el.type==='range'||f==='max_height'?Number(el.value):el.value)}
- await post('/api/settings',b);hide('settings');toast('Settings saved (applies to items that start after this)')}
+ await post('/api/settings',b);mainBefore=null;hide('settings');toast('Settings saved (applies to items that start after this)')}
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id===t.dataset.tab))});
 refresh();setInterval(refresh,1000);
 </script></body></html>
