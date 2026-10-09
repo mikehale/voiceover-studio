@@ -9,7 +9,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 APP_NAME = 'Voiceover Studio'
-VERSION = '1.0.0'
+VERSION = '0.2.0'
 KOKORO_FILES = [
     ('kokoro-v1.0.fp16.onnx', 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx', 177464787),
     ('voices-v1.0.bin', 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin', 28214398),
@@ -17,6 +17,10 @@ KOKORO_FILES = [
 OLD_MODEL_FILES = ['kokoro-v1.0.onnx']            # fp32 model used by v1.0.0; replaced by the fp16 one
 DENO_URL = 'https://github.com/denoland/deno/releases/latest/download/deno-aarch64-apple-darwin.zip'
 STAGE_WEIGHTS = [('ocr', 0.40), ('separate', 0.18), ('tts', 0.30), ('mix', 0.07), ('mux', 0.05)]
+CLONE_STAGE_WEIGHTS = [('ocr', 0.14), ('separate', 0.06), ('clone', 0.74), ('tts', 0.02), ('mix', 0.02), ('mux', 0.02)]
+# optional cloned voices (Chatterbox): separate venv + model, only when the user opts in
+CLONE_REPO = 'ResembleAI/chatterbox'
+CLONE_FILES_BYTES = 3191366992            # ve + t3_cfg + s3gen + tokenizer + conds at the pinned revision
 VIDEO_EXT = ('.mkv', '.webm', '.mp4', '.mov', '.m4v', '.avi')
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -29,6 +33,9 @@ class Paths:
         self.data = os.path.abspath(os.path.expanduser(a.data))   # ~/Library/Application Support/Voiceover Studio
         self.venv = os.path.join(self.data, 'venv')
         self.py = os.path.join(self.venv, 'bin', 'python')
+        self.cvenv = os.path.join(self.data, 'clone-venv')            # optional Chatterbox venv (opt-in)
+        self.cpy = os.path.join(self.cvenv, 'bin', 'python')
+        self.cmodel = os.path.join(self.data, 'models', 'chatterbox')       # plain files, removable as a unit
         self.bin = os.path.join(self.res, 'bin')                  # bundled uv, ffmpeg, ffprobe
         self.dbin = os.path.join(self.data, 'bin')                # downloaded deno
         self.models = os.path.join(self.data, 'models')
@@ -48,7 +55,7 @@ class Paths:
 
 P = None
 LOCK = threading.RLock()
-STATE = {'setup': {}, 'items': [], 'settings': {}, 'paused': False}
+STATE = {'setup': {}, 'items': [], 'settings': {}, 'paused': False, 'clone': {'state': 'absent'}}
 CHANGED = threading.Event()
 
 def log(msg):
@@ -71,7 +78,7 @@ def load(path, default):
 def default_settings():
     return dict(output_dir=os.path.expanduser('~/Movies/Voiceover'), voice_dialogue='bm_daniel', voice_narrator='bm_lewis',
                 voice_lyrics='skip', jp_db=-15, duck_db=-9, tts_db=0, keep_source=False, video_codec='h264',
-                cookies='none', max_height=720)
+                cookies='none', max_height=720, clone_default=False, clone_optin=False)
 
 def save_queue():
     with LOCK:
@@ -106,6 +113,8 @@ def env_for_tools():
     env.pop('UV_CACHE_DIR', None)
     env['UV_PYTHON_INSTALL_DIR'] = os.path.join(P.data, 'python')
     env['HF_HUB_DISABLE_TELEMETRY'] = '1'
+    env['TQDM_DISABLE'] = '1'
+    env['LOTGH_CLONE_MODEL'] = P.cmodel
     cert = certifi_path()
     if cert: env['SSL_CERT_FILE'] = cert
     return env
@@ -232,6 +241,12 @@ def do_setup():
         ff = subprocess.run([P.tool('ffmpeg'), '-hide_banner', '-decoders'], capture_output=True, text=True).stdout
         if 'libdav1d' not in ff and 'av1' not in ff: raise RuntimeError('bundled ffmpeg cannot decode AV1')
         mark('check')
+        if STATE['settings'].get('clone_optin') and not clone_ready():
+            with LOCK:
+                STATE['setup']['steps']['clone'] = {'label': 'Cloned voices (Chatterbox, optional)', 'state': 'running',
+                                                    'pct': None, 'detail': ''}
+                STATE['setup']['order'].append('clone')
+            do_clone_install()        # never fails base setup; errors show in Settings > Voices
         with LOCK: STATE['setup']['state'] = 'ready'
         log('setup complete')
     except Exception as e:
@@ -244,10 +259,119 @@ def do_setup():
 
 def setup_ready(): return STATE['setup'].get('state') == 'ready'
 
+# ------------------------------------------- optional cloned voices -----------------------------------------------
+def clone_lock_hash():
+    with open(os.path.join(P.app, 'clone-requirements.lock'), 'rb') as f: return hashlib.sha1(f.read()).hexdigest()[:12]
+
+def clone_ready():
+    m = load(os.path.join(P.data, 'clone_done.json'), {})
+    return bool(m) and m.get('lock') == clone_lock_hash() and os.path.exists(P.cpy) and \
+        os.path.exists(os.path.join(P.cmodel, 't3_cfg.safetensors'))
+
+def dir_size(p):
+    tot = 0
+    for root, _, files in os.walk(p):
+        for f in files:
+            fp = os.path.join(root, f)
+            if not os.path.islink(fp):
+                try: tot += os.path.getsize(fp)
+                except OSError: pass
+    return tot
+
+def clone_refresh():
+    with LOCK:
+        if STATE['clone'].get('state') in ('installing', 'removing'): return
+        if clone_ready():
+            STATE['clone'] = {'state': 'ready', 'detail': '', 'size': dir_size(P.cvenv) + dir_size(P.cmodel),
+                              'info': load(os.path.join(P.data, 'clone_done.json'), {}).get('selftest', '')}
+        else:
+            partial = os.path.exists(P.cvenv) or os.path.exists(P.cmodel)
+            STATE['clone'] = {'state': 'error' if STATE['clone'].get('state') == 'error' else 'absent',
+                              'error': STATE['clone'].get('error', ''), 'partial': partial,
+                              'size': (dir_size(P.cvenv) + dir_size(P.cmodel)) if partial else 0}
+    CHANGED.set()
+
+def cset(**kw):
+    with LOCK:
+        STATE['clone'].update(kw)
+        st = STATE['setup'].get('steps', {}).get('clone')
+        if st and STATE['setup'].get('state') == 'running':
+            st.update({k: v for k, v in kw.items() if k in ('pct', 'detail')})
+            if kw.get('state') in ('ready', 'error'): st['state'] = 'done' if kw['state'] == 'ready' else 'error'
+    CHANGED.set()
+
+def _clone_logged(cmd, env=None):
+    logf = open(os.path.join(P.logs, 'clone_setup.log'), 'a')
+    logf.write(f"\n$ {' '.join(cmd)}\n"); logf.flush()
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env or env_for_tools(), bufsize=1)
+    last = ''
+    for line in p.stdout:
+        logf.write(line); line = line.strip()
+        if line: last = line; cset(detail=line[-160:])
+    p.wait(); logf.close()
+    if p.returncode != 0: raise RuntimeError(f'{os.path.basename(cmd[0])} failed: {last[-300:]}')
+    return last
+
+CLONE_LOCK = threading.Lock()
+def do_clone_install():
+    """Separate venv + pinned packages + model files + self-test. The base venv is never touched."""
+    if not CLONE_LOCK.acquire(blocking=False): return
+    try:
+        cset(state='installing', error='', pct=None, detail='creating separate Python environment')
+        log('cloned voices: install started')
+        uv = P.tool('uv')
+        if not os.path.exists(P.cpy):
+            _clone_logged([uv, 'venv', '--python', '3.11', P.cvenv])
+        cset(detail='installing Chatterbox and PyTorch (about 1 GB)')
+        _clone_logged([uv, 'pip', 'sync', '--python', P.cpy, os.path.join(P.app, 'clone-requirements.lock')])
+        cset(detail='downloading the Chatterbox model (3.2 GB)', pct=0.0)
+        done = threading.Event(); xet = os.path.join(P.data, 'hf', 'xet'); x0 = dir_size(xet)
+        def watch():
+            while not done.wait(1.0):
+                sz = dir_size(P.cmodel) + max(0, dir_size(xet) - x0)
+                cset(pct=min(99.0, 100 * sz / CLONE_FILES_BYTES), detail=f'downloading the Chatterbox model: '
+                     f'{sz / 1e9:.1f} / {CLONE_FILES_BYTES / 1e9:.1f} GB')
+        threading.Thread(target=watch, daemon=True).start()
+        try: _clone_logged([P.cpy, '-m', 'lotgh_vo.clone_worker', '--download', P.cmodel])
+        finally: done.set()
+        cset(pct=None, detail='self-test (loading the model and speaking one sentence)')
+        env = env_for_tools(); env['HF_HUB_OFFLINE'] = '1'
+        out = _clone_logged([P.cpy, '-m', 'lotgh_vo.clone_worker', '--selftest'], env=env)
+        out = (re.findall(r'chatterbox ok[^\r\n]*', out) or [out])[-1]
+        atomic_write(os.path.join(P.data, 'clone_done.json'), {'lock': clone_lock_hash(), 'selftest': out, 'time': time.time()})
+        log('cloned voices installed: ' + out)
+        cset(state='ready', pct=100.0, detail='')
+        clone_refresh()
+    except Exception as e:
+        log('cloned voices install failed: ' + traceback.format_exc())
+        cset(state='error', error=str(e)[:400], pct=None, detail='')
+        clone_refresh()
+    finally:
+        CLONE_LOCK.release()
+
+def do_clone_remove():
+    if not CLONE_LOCK.acquire(blocking=False): return
+    try:
+        cset(state='removing', detail='removing cloned voices', pct=None)
+        for p in (os.path.join(P.data, 'clone_done.json'),):
+            if os.path.exists(p): os.remove(p)
+        shutil.rmtree(P.cvenv, ignore_errors=True); shutil.rmtree(P.cmodel, ignore_errors=True)
+        with LOCK:
+            STATE['settings']['clone_default'] = False; STATE['settings']['clone_optin'] = False
+            for it in STATE['items']:
+                if it['status'] in ('queued', 'error', 'stopped') and it.get('clone'): it['clone'] = False
+        save_settings(); save_queue()
+        log('cloned voices removed')
+        with LOCK: STATE['clone'] = {'state': 'idle'}
+        clone_refresh()
+    finally:
+        CLONE_LOCK.release()
+
 # --------------------------------------------------- queue ------------------------------------------------------
 def new_item(**kw):
     it = dict(id=uuid.uuid4().hex[:10], kind='url', url='', path='', title='', start='', end='', status='queued',
-              stage='', stage_pct=0.0, pct=0.0, message='', output='', added=time.time(), updated=time.time(), lines=0)
+              stage='', stage_pct=0.0, pct=0.0, message='', output='', added=time.time(), updated=time.time(), lines=0,
+              clone=False)
     it.update(kw); return it
 
 def find(iid):
@@ -262,7 +386,7 @@ def upd(it, **kw):
 
 URL_RE = re.compile(r'https?://\S+')
 
-def add_text(text, start='', end=''):
+def add_text(text, start='', end='', clone=False):
     added = []
     with LOCK:
         for raw in text.splitlines():
@@ -270,19 +394,20 @@ def add_text(text, start='', end=''):
             if not s: continue
             if URL_RE.match(s):
                 added.append(new_item(kind='url', url=s, title=s, status='expanding', message='Reading video info...',
-                                      start=start, end=end))
+                                      start=start, end=end, clone=clone))
             elif os.path.exists(os.path.expanduser(s)):
                 pth = os.path.abspath(os.path.expanduser(s))
-                added.append(new_item(kind='file', path=pth, title=os.path.basename(pth), start=start, end=end))
+                added.append(new_item(kind='file', path=pth, title=os.path.basename(pth), start=start, end=end, clone=clone))
         STATE['items'].extend(added)
     save_queue()
     return len(added)
 
-def add_files(paths, start='', end=''):
+def add_files(paths, start='', end='', clone=False):
     with LOCK:
         for pth in paths:
             if os.path.isfile(pth):
-                STATE['items'].append(new_item(kind='file', path=pth, title=os.path.basename(pth), start=start, end=end))
+                STATE['items'].append(new_item(kind='file', path=pth, title=os.path.basename(pth), start=start, end=end,
+                                               clone=clone))
     save_queue()
 
 def ytdlp_base():
@@ -313,7 +438,7 @@ def expander_loop():
                         if url and not url.startswith('http') and e.get('ie_key') == 'Youtube':
                             url = f'https://www.youtube.com/watch?v={url}'
                         new.append(new_item(kind='url', url=url, title=e.get('title') or url, start=it['start'],
-                                            end=it['end'], playlist=info.get('title') or ''))
+                                            end=it['end'], playlist=info.get('title') or '', clone=it.get('clone', False)))
                     with LOCK:
                         idx = STATE['items'].index(it)
                         STATE['items'][idx:idx + 1] = new
@@ -433,11 +558,17 @@ def voiceover(it, src, base_pct):
            '--models', P.models, '--jp-db', str(s['jp_db']), '--duck-db', str(s['duck_db']), '--tts-db', str(s.get('tts_db', 0)),
            '--video-codec', s.get('video_codec', 'h264')]
     if s.get('voice_lyrics', 'skip') != 'skip': cmd += ['--no-skip-white']
+    use_clone = bool(it.get('clone'))
+    if use_clone and not clone_ready():
+        use_clone = False; log(f"item {it['id']}: cloned voices requested but not installed; using Kokoro")
+    if use_clone: cmd += ['--clone', '--clone-python', P.cpy]
     if it['kind'] == 'file' and (it.get('start') or it.get('end')):
         if it.get('start'): cmd += ['--start', it['start']]
         if it.get('end'): cmd += ['--end', it['end']]
-    weights = dict(STAGE_WEIGHTS); order = [k for k, _ in STAGE_WEIGHTS]
+    sw = CLONE_STAGE_WEIGHTS if use_clone else STAGE_WEIGHTS
+    weights = dict(sw); order = [k for k, _ in sw]
     labels = {'ocr': 'Reading subtitles (OCR)', 'separate': 'Separating voices', 'tts': 'Generating English speech',
+              'clone': 'Cloning voices (Chatterbox)',
               'mix': 'Mixing', 'mux': 'Writing video'}
     st = {'stage': 'ocr', 'pct': 0.0}
     def overall():
@@ -460,6 +591,10 @@ def voiceover(it, src, base_pct):
             if em: extra = f' (ETA {float(em.group(1)):.0f} min)' if float(em.group(1)) >= 1 else ''
             text = labels[stage] + (f' {st["pct"]:.0f}%' if pm else '') + extra
             if stage == 'mux' and 'encoding English' in msg: text = 'Encoding audio'
+            if stage == 'clone' and not pm:
+                if 'grouping' in msg: text = 'Cloning voices: grouping speakers'
+                elif 'loading' in msg: text = 'Cloning voices: loading Chatterbox'
+                else: text = it.get('message') or labels['clone']
             if stage == 'mux' and 'writing' in msg: text = 'Writing video' + (' (H.264 encode)' if s.get('video_codec') == 'h264' else '')
             upd(it, stage=st['stage'], stage_pct=st['pct'], pct=overall(), message=text)
         elif stage == 'voices':
@@ -546,7 +681,7 @@ class H(BaseHTTPRequestHandler):
                 with LOCK:
                     return self._json({'setup': STATE['setup'], 'items': STATE['items'], 'settings': STATE['settings'],
                                        'paused': STATE['paused'], 'current': CURRENT['item']['id'] if CURRENT['item'] else None,
-                                       'version': VERSION, 'data_dir': P.data})
+                                       'version': VERSION, 'data_dir': P.data, 'clone': STATE['clone']})
             m = re.match(r'/api/log/(\w+)$', u.path)
             if m:
                 pth = os.path.join(P.logs, f'{m.group(1)}.log')
@@ -574,16 +709,32 @@ class H(BaseHTTPRequestHandler):
             log('api error ' + traceback.format_exc()); self._json({'error': str(e)}, 400)
 
 def handle_post(path, b):
+    want_clone = bool(b.get('clone')) and clone_ready()
     if path == '/api/add':
-        return {'added': add_text(b.get('text', ''), b.get('start', ''), b.get('end', ''))}
+        return {'added': add_text(b.get('text', ''), b.get('start', ''), b.get('end', ''), want_clone)}
     if path == '/api/add_files':
-        add_files(b.get('paths', []), b.get('start', ''), b.get('end', '')); return None
+        add_files(b.get('paths', []), b.get('start', ''), b.get('end', ''), want_clone); return None
+    if path == '/api/clone/optin':                       # checkbox on the first-run screen
+        with LOCK: STATE['settings']['clone_optin'] = bool(b.get('on'))
+        save_settings()
+        if b.get('on') and setup_ready() and not clone_ready():
+            threading.Thread(target=do_clone_install, daemon=True).start()
+        return None
+    if path == '/api/clone/install':
+        if not setup_ready(): raise ValueError('finish the basic setup first')
+        with LOCK: STATE['settings']['clone_optin'] = True
+        save_settings(); threading.Thread(target=do_clone_install, daemon=True).start(); return None
+    if path == '/api/clone/remove':
+        if CURRENT['item'] is not None and CURRENT['item'].get('clone'):
+            raise ValueError('a video using cloned voices is being processed; stop it first')
+        threading.Thread(target=do_clone_remove, daemon=True).start(); return None
     if path == '/api/pause':
         STATE['paused'] = bool(b.get('paused')); save_queue(); return None
     if path == '/api/settings':
         with LOCK:
             for k, v in b.items():
-                if k in default_settings(): STATE['settings'][k] = v
+                if k in default_settings() and k != 'clone_optin': STATE['settings'][k] = v
+            if not clone_ready(): STATE['settings']['clone_default'] = False
         save_settings(); return None
     if path == '/api/setup/retry':
         if STATE['setup'].get('state') != 'running': threading.Thread(target=do_setup, daemon=True).start()
@@ -614,6 +765,9 @@ def handle_post(path, b):
         elif act == 'retry' and not running:
             upd(it, status='expanding' if it['kind'] == 'url' and it.get('title') == it.get('url') else 'queued',
                 message='', pct=0, stage='')
+        elif act in ('clone_on', 'clone_off') and not running and it['status'] != 'done':
+            if act == 'clone_on' and not clone_ready(): raise ValueError('cloned voices are not installed')
+            with LOCK: it['clone'] = act == 'clone_on'
         elif act in ('up', 'down', 'top'):
             with LOCK:
                 items.pop(i)
@@ -657,6 +811,8 @@ def main():
     old_cache = os.path.join(P.data, 'uv-cache')                # left by v1.0.0 installs (~1 GB)
     if os.path.isdir(old_cache):
         threading.Thread(target=lambda: (shutil.rmtree(old_cache, ignore_errors=True), log('removed old uv-cache')), daemon=True).start()
+    for it in STATE['items']: it.setdefault('clone', False)
+    clone_refresh()
     srv = ThreadingHTTPServer(('127.0.0.1', a.port), H)
     for fn in (do_setup, expander_loop, worker_loop):
         threading.Thread(target=fn, daemon=True).start()

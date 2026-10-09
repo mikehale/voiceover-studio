@@ -3,7 +3,7 @@ import argparse, os, re, shutil, sys, time
 from .util import FFMPEG, log, probe, run, cpu_count, load_json
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STAGES = ['ocr', 'separate', 'tts', 'mix', 'mux']
+STAGES = ['ocr', 'separate', 'tts', 'mix', 'mux']          # (+ 'clone' before tts with --clone)
 
 def parse_args(argv=None):
     cores = cpu_count()
@@ -33,6 +33,11 @@ def parse_args(argv=None):
     g.add_argument('--voice-speed', action='append', default=[], metavar='VOICE=X',
                    help='base speaking speed per voice, e.g. bm_daniel=1.12 (also "speeds" in voices.json)')
     g.add_argument('--max-tempo', type=float, default=1.4, help='max speed-up to fit a line in its slot')
+    g = ap.add_argument_group('cloned voices (optional, needs the Chatterbox venv)')
+    g.add_argument('--clone', action='store_true',
+                   help="voice lines with Chatterbox in the original actors' voices (much slower; Kokoro fallback per line)")
+    g.add_argument('--clone-python', help='python of the venv that has chatterbox-tts installed')
+    g.add_argument('--clone-device', choices=['auto', 'mps', 'cpu'], default='auto', help='Chatterbox device')
     g = ap.add_argument_group('mix levels (dB)')
     g.add_argument('--jp-db', type=float, default=-15, help='Japanese vocals level')
     g.add_argument('--duck-db', type=float, default=-9, help='extra Japanese attenuation while English plays')
@@ -147,12 +152,12 @@ def main(argv=None):
         from .textfix import load_corrections, apply_corrections
         rules = load_corrections(a.corrections); subs = [[s, e, apply_corrections(x, rules, 'dialogue'), c] for s, e, x, c in subs]
     vm = voice_map(a)
-    lines, skipped = [], {}
+    lines, skipped, classes = [], {}, []
     for s, e, text, cls in subs:
         v = vm.get(cls, vm.get('other', 'bm_george'))
         if not v or v == 'skip': skipped[cls] = skipped.get(cls, 0) + 1; continue
         if s >= info['duration'] - 0.3: continue
-        lines.append([s, e, text, v, lang_for(v)])
+        lines.append([s, e, text, v, lang_for(v)]); classes.append(cls)
     used = {}
     for l in lines: used[l[3]] = used.get(l[3], 0) + 1
     log('voices', f'map {vm}; voicing {len(lines)} lines {used}; skipped {skipped}')
@@ -164,10 +169,20 @@ def main(argv=None):
     from .separate import run_separation
     chunks = run_separation(a, video, info, wd); T['separate'] = time.time() - t
     if stop('separate'): return
-    # 3. TTS
+    # 3. TTS (optionally cloned voices first; Kokoro for everything else)
+    external = None
+    if a.clone:
+        t = time.time()
+        if a.clone_python and os.path.exists(a.clone_python):
+            from .clone import run_clone
+            external = run_clone(a, lines, classes, chunks, info['duration'], wd)
+        else:
+            log('clone', f'Chatterbox venv not found ({a.clone_python}); using Kokoro for every line')
+        T['clone'] = time.time() - t
     t = time.time()
     from .tts import run_tts
-    place = run_tts(a, lines, info['duration'], wd); T['tts'] = time.time() - t
+    place = run_tts(a, lines, info['duration'], wd, external) if external else run_tts(a, lines, info['duration'], wd)
+    T['tts'] = time.time() - t
     if stop('tts'): return
     # 4. mix (streaming)
     t = time.time()

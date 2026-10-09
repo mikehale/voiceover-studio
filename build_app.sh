@@ -35,7 +35,7 @@ xattr -cr "$APP/Contents/Resources/bin" || true
 echo "== copying app code (no symlinks, no caches)"
 mkdir -p "$APP/Contents/Resources/app"
 rsync -a --no-links --exclude '__pycache__' --exclude '*.pyc' --exclude '.DS_Store' \
-  app/server.py app/requirements.lock app/ui "$APP/Contents/Resources/app/"
+  app/server.py app/requirements.lock app/clone-requirements.lock app/ui "$APP/Contents/Resources/app/"
 rsync -a --no-links --exclude '__pycache__' --exclude '*.pyc' --exclude 'models' pipeline "$APP/Contents/Resources/app/"
 if [ -n "$(find "$APP" -type l)" ]; then echo "ERROR: symlinks in bundle"; find "$APP" -type l; exit 1; fi
 

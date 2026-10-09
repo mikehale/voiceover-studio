@@ -38,8 +38,10 @@ def synth_line(job):
     os.replace(out + '.tmp.wav', out); os.remove(tmp_in)
     return j['i'], sf.info(out).duration, dict(raw=round(raw, 2), speed=round(sp, 2), atempo=round(tempo, 3))
 
-def run_tts(a, lines, dur, wd):
-    """lines: [[start,end,text,voice,lang], ...] (already filtered). Returns placements [[start,dur,path,i]]."""
+def run_tts(a, lines, dur, wd, external=None):
+    """lines: [[start,end,text,voice,lang], ...] (already filtered). Returns placements [[start,dur,path,i]].
+    external: optional {i: dict(out=wav, meta=...)} of lines already generated and fitted elsewhere (cloned voices);
+    those are placed as-is and Kokoro only synthesises the rest."""
     from multiprocessing import get_context
     tdir = os.path.join(wd, 'tts'); os.makedirs(tdir, exist_ok=True)
     jobs = []
@@ -53,9 +55,13 @@ def run_tts(a, lines, dur, wd):
         key = h(TTS_VERSION, text, voice, lang, round(slot, 2), a.max_tempo, base)
         jobs.append(dict(i=i, text=text, voice=voice, lang=lang, slot=slot, max_tempo=a.max_tempo, base_speed=base,
                          out=os.path.join(tdir, f'{key}.wav')))
+        if external and i in external:
+            jobs[-1].update(out=external[i]['out'], external=True)
+    meta = {i: dict(x['meta']) for i, x in (external or {}).items()}
+    if external:
+        log('tts', f'{len(external)} lines use cloned voices; Kokoro for the other {len(jobs) - len(external)}')
     todo = [j for j in jobs if not os.path.exists(j['out'])]
     log('tts', f'{len(jobs)} lines, {len(jobs) - len(todo)} cached, {len(todo)} to synthesise, {a.tts_jobs} workers')
-    meta = {}
     if todo:
         provider = 'cpu'
         tts_pref = getattr(a, 'tts_provider', 'cpu')
@@ -82,7 +88,8 @@ def run_tts(a, lines, dur, wd):
         d = sf.info(j['out']).duration
         start = max(s, cursor + 0.05); cursor = start + d
         place.append([start, d, j['out'], j['i']])
-        report.append(dict(i=j['i'] + 1, start=round(start, 2), slot=round(j['slot'], 2), dur=round(d, 2), voice=voice,
+        report.append(dict(i=j['i'] + 1, start=round(start, 2), slot=round(j['slot'], 2), dur=round(d, 2),
+                           voice=('clone:' + meta[j['i']].get('clone', '')) if j.get('external') else voice,
                            shift=round(start - s, 2), text=text, **meta.get(j['i'], {})))
     atomic_json(os.path.join(wd, 'tts_report.json'), report)
     shifted = sum(1 for r in report if r['shift'] > 0.01)

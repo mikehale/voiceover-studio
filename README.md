@@ -36,6 +36,8 @@ On a fast connection setup takes about 3–6 minutes. Everything goes into `~/Li
 
 FFmpeg/ffprobe (static arm64 builds) and `uv` are bundled inside the app.
 
+The setup screen also has an unticked **Cloned voices (Chatterbox)** checkbox. Leave it off and nothing extra is installed (see *Cloned voices* below).
+
 ## Using it
 
 - **Add videos.** Paste one or more YouTube video or playlist URLs and click **Add to queue**. A playlist is expanded into one queue item per video. **Add local videos…** adds files from your Mac.
@@ -46,10 +48,20 @@ FFmpeg/ffprobe (static arm64 builds) and `uv` are bundled inside the app.
 - **"No hardsubs found".** An item is marked this way when OCR finds almost no subtitle lines in it. Soft subtitles that you can switch on or off in the player don't count.
 - **Where the output goes.** Each finished video is saved as `<title> (English VO).mp4` in the output folder. Its OCR subtitle files go in the `Subtitles/` subfolder. If **keep source** is on, the downloaded original goes in `Sources/`.
 
+### Cloned voices (optional)
+
+Cloned voices speak the English lines **in the voices of the original Japanese actors** (so with their accent), using [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT licence) locally on your Mac.
+
+- **Install:** tick the box on the first-run screen, or later use **Settings > Voices > Cloned voices > Install**. It goes into its own Python environment (`clone-venv`) plus the model (`hf/`) inside the app's data folder: about 4 GB (0.8 GB of Python packages + 3.2 GB model; about 2 minutes on a fast connection) in total. The standard install is not changed. **Remove** deletes both.
+- **Use:** tick **Use cloned voices** before adding videos, or switch it per queued item. **Settings > Voices** has a default for new videos (off).
+- **How it works:** speakers are grouped automatically by voice fingerprint from the separated Japanese voice track. The narrator (cyan) gets its own voice. Each speaker gets a 6–10 s reference clip of their clean speech. Lines are fitted into the same subtitle slots as the standard voices. A line that can't be cloned uses the standard voice for its colour, and the item's log says so.
+- **Speed:** generation runs on the GPU (MPS) with CPU fallback. It is much slower than the standard voices: on an M3 Max, Chatterbox needs about 1.8 s of GPU time per second of speech, so a 4-minute sample took 4.3 minutes instead of 1.3, and a 24-minute episode takes roughly 20–25 minutes longer.
+- **Limits:** grouping by voice is automatic and can mix up similar-sounding characters or split one character in two. Short lines are assigned from the conversation context. Chatterbox output carries Resemble AI's inaudible watermark.
+
 ### Settings
 
 - **Output folder.**
-- **Voices.** Choose the voice for each subtitle colour: dialogue (yellow), narrator (cyan), and song lyrics (white; not voiced by default).
+- **Voices.** Choose the voice for each subtitle colour: dialogue (yellow), narrator (cyan), and song lyrics (white; not voiced by default). Install or remove cloned voices and set whether new videos use them.
 - **Levels.** Japanese voice level (default −15 dB), extra ducking under English (−9 dB), and English level.
 - **Output video.**
   - **H.264** (default) re-encodes with the Mac's hardware encoder and plays everywhere.
@@ -69,7 +81,7 @@ On an M-series Mac a 24-minute episode takes very roughly 10–20 minutes. OCR a
 ## Known limitations
 
 - Apple Silicon only.
-- The app works only with subtitles that are burned into the picture. Voices are picked by subtitle colour (yellow/red/green = dialogue, cyan = narrator, white = lyrics), not per character.
+- The app works only with subtitles that are burned into the picture. Standard voices are picked by subtitle colour (yellow/red/green = dialogue, cyan = narrator, white = lyrics), not per character. Cloned voices group speakers automatically within each video, without character names, and don't remember characters between episodes.
 - OCR can misread stylised fonts. Use **Edit corrections…** for recurring mistakes.
 - Very long speech in a short subtitle slot is sped up to 1.4× at most, and may overlap the next line.
 - YouTube changes often. If downloads fail, use **Settings > Update yt-dlp**.
