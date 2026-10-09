@@ -16,15 +16,20 @@ main{padding:18px 20px;max-width:1000px;margin:0 auto}
 textarea,input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 8px;-webkit-user-select:text}
 textarea{width:100%;height:70px;resize:vertical}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1}.mut{color:var(--mut)}
-.item{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:11px 2px;border-top:1px solid var(--line)}
-.item:first-child{border-top:none}.title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 14px;padding:11px 14px 12px;margin-top:10px;border:1px solid var(--line);border-left-width:3px;border-radius:10px;background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.item-info{min-width:0}.item .bar{grid-column:1/-1;height:6px;margin-top:9px}
+.item.st-error,.item.st-no_hardsubs{border-left:3px solid var(--warn)}.item.st-error{border-left-color:var(--err)}.item.st-done{border-left:3px solid var(--ok)}
+.item.st-downloading,.item.st-processing{border-left:3px solid var(--acc)}.title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sub{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .4s}
 .badge{font-size:11px;padding:1px 7px;border-radius:9px;font-weight:600;margin-right:6px;background:var(--line)}
 .b-done{background:#d7f5e3;color:var(--ok)}.b-error{background:#fde2e0;color:var(--err)}.b-no_hardsubs{background:#fdf0d5;color:var(--warn)}
 .b-processing,.b-downloading{background:#e5e5ff;color:var(--acc)}
 @media (prefers-color-scheme:dark){.b-done{background:#173d27}.b-error{background:#4a1f1c}.b-no_hardsubs{background:#4a3a14}.b-processing,.b-downloading{background:#2b2b5c;color:#b3b3ff}}
-.acts{display:flex;gap:4px;align-items:start}
+.acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;align-items:center;align-self:start}
+.acts button.sm{height:26px;padding:0 9px;border-radius:6px}.acts button.ico{width:26px;padding:0;font-size:13px;color:var(--mut)}.acts button.ico:hover:not(:disabled){color:var(--fg)}
+.acts .sep{width:1px;height:16px;background:var(--line);margin:0 2px}
+@media (max-width:700px){.item{grid-template-columns:minmax(0,1fr)}.acts{justify-content:flex-start;margin-top:7px}.item .bar{margin-top:8px}}
 .empty{text-align:center;color:var(--mut);padding:26px}
 #setup{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;align-items:center;justify-content:center}
 #setup .box{width:560px}.step{display:grid;grid-template-columns:22px 1fr;gap:2px 8px;margin:9px 0}
@@ -123,12 +128,12 @@ function itemHTML(it,i,n){
  if(run)acts+=`<button class="sm" onclick="post('/api/item/${it.id}/stop')">Stop</button>`;
  if(['error','stopped','no_hardsubs','done'].includes(it.status))acts+=`<button class="sm" onclick="post('/api/item/${it.id}/retry')">${it.status==='done'?'Redo':'Retry'}</button>`;
  if(it.status==='done'&&it.output)acts+=`<button class="sm" onclick="native('openPath',{path:'${esc(it.output).replace(/'/g,"\\'")}'})">Play</button><button class="sm" onclick="native('reveal',{path:'${esc(it.output).replace(/'/g,"\\'")}'})">Show</button>`;
- acts+=`<button class="sm" title="Move up" ${i==0?'disabled':''} onclick="post('/api/item/${it.id}/up')">↑</button><button class="sm" title="Move down" ${i==n-1?'disabled':''} onclick="post('/api/item/${it.id}/down')">↓</button>`;
- acts+=`<button class="sm" title="Log" onclick="showLog('${it.id}')">≡</button><button class="sm" title="Remove" onclick="post('/api/item/${it.id}/remove')">✕</button>`;
- return `<div class="item"><div style="min-width:0"><div class="title">${esc(it.title||src)}</div>
+ acts+=`${acts?'<span class="sep"></span>':''}<button class="sm ico" title="Move up" ${i==0?'disabled':''} onclick="post('/api/item/${it.id}/up')">↑</button><button class="sm ico" title="Move down" ${i==n-1?'disabled':''} onclick="post('/api/item/${it.id}/down')">↓</button>`;
+ acts+=`<button class="sm ico" title="Log" onclick="showLog('${it.id}')">≡</button><button class="sm ico" title="Remove" onclick="post('/api/item/${it.id}/remove')">✕</button>`;
+ return `<div class="item st-${it.status}"><div class="item-info"><div class="title">${esc(it.title||src)}</div>
  <div class="sub"><span class="badge b-${it.status}">${STATUS[it.status]||it.status}</span>${esc(it.message||'')}</div>
  <div class="sub">${esc(src)}${rng}${it.playlist?' · '+esc(it.playlist):''}</div>
- ${(run||it.status==='done')?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}</div><div class="acts">${acts}</div></div>`}
+ </div><div class="acts">${acts}</div>${(run||it.status==='done')?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}</div>`}
 async function showLog(id){const r=await api('/api/log/'+id);document.getElementById('logt').textContent='Log';document.getElementById('logp').textContent=r.log||'(empty)';show('logm');const p=document.getElementById('logp');p.scrollTop=p.scrollHeight}
 function renderSetup(st){
  const ready=st.state==='ready';document.getElementById('setup').style.display=ready?'none':'flex';if(ready||!st.steps)return;
