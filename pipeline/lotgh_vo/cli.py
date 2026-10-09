@@ -5,6 +5,10 @@ from .util import FFMPEG, log, probe, run, cpu_count, load_json
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STAGES = ['ocr', 'separate', 'tts', 'mix', 'mux']          # (+ 'clone' before tts with --clone)
 
+
+def _jp_level(v):
+    return None if str(v).strip().lower() in ('off', 'none', '') else float(v)
+
 def parse_args(argv=None):
     cores = cpu_count()
     ap = argparse.ArgumentParser(prog='lotgh_voiceover', description='English voice-over from burned-in subtitles.',
@@ -38,8 +42,12 @@ def parse_args(argv=None):
                    help="voice lines with Chatterbox in the original actors' voices (much slower; Kokoro fallback per line)")
     g.add_argument('--clone-python', help='python of the venv that has chatterbox-tts installed')
     g.add_argument('--clone-device', choices=['auto', 'mps', 'cpu'], default='auto', help='Chatterbox device')
+    g.add_argument('--clone-accent', choices=['original', 'german'], default='original',
+                   help='accent of the cloned voices: original (as the reference) or german (Chatterbox Multilingual)')
     g = ap.add_argument_group('mix levels (dB)')
-    g.add_argument('--jp-db', type=float, default=-15, help='Japanese vocals level')
+    g.add_argument('--jp-db', type=_jp_level, default=None,
+                   help="Japanese vocals level in dB, or 'off' (default): the vocals stem is left out of the English mix "
+                        "and nothing is ducked. The original Japanese audio is always kept as the second audio track.")
     g.add_argument('--duck-db', type=float, default=-9, help='extra Japanese attenuation while English plays')
     g.add_argument('--tts-db', type=float, default=0, help='English voice level')
     g.add_argument('--duck-hold', type=float, default=0.15); g.add_argument('--duck-smooth', type=float, default=0.3)

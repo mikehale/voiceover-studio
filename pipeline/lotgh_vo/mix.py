@@ -17,7 +17,7 @@ def _smooth(x, w):
     return np.clip(_box(_box(x, w // 2), w // 2), 0, 1)
 
 def mix_sig(a, chunks, place):
-    return h('mix3', a.jp_db, a.duck_db, a.tts_db, a.duck_hold, a.duck_smooth, len(chunks), a.sep_chunk, a.abitrate,
+    return h('mix3', 'off' if a.jp_db is None else a.jp_db, a.duck_db, a.tts_db, a.duck_hold, a.duck_smooth, len(chunks), a.sep_chunk, a.abitrate,
              *[f'{p[0]:.3f}:{os.path.basename(p[2])}' for p in place])
 
 def final_mix_path(wd): return os.path.join(wd, 'mix', 'english_mix.m4a')
@@ -39,8 +39,12 @@ def run_mix(a, chunks, place, wd):
         m = load_json(meta)
         if m and m.get('sig') == sig and os.path.exists(out) and 'force_mix' not in a.force:
             outs.append(out); peaks.append(m['peak']); pr.step(); continue
-        voc, _ = sf.read(vp, dtype='float32'); bg, _ = sf.read(bp, dtype='float32')
-        n = min(len(voc), len(bg)); voc, bg = voc[:n], bg[:n]
+        jp_off = a.jp_db is None                              # Japanese voices left out: background + English only
+        bg, _ = sf.read(bp, dtype='float32')
+        if jp_off: voc = None; n = min(sf.info(vp).frames, len(bg)); bg = bg[:n]
+        else:
+            voc, _ = sf.read(vp, dtype='float32')
+            n = min(len(voc), len(bg)); voc, bg = voc[:n], bg[:n]
         w0 = t0 - ctx; N = n + int(2 * ctx * SR)              # working window incl. context
         eng = np.zeros(N, np.float32); mask = np.zeros(N, np.float32)
         for start, d, wav, _ in place:
@@ -51,12 +55,15 @@ def run_mix(a, chunks, place, wd):
             i1 = min(N, i0 + len(x) - a0)
             if i1 <= i0: continue
             eng[i0:i1] += x[a0:a0 + i1 - i0] * db(a.tts_db); mask[i0:i1] = 1
-        # duck envelope: pre-roll (attack) and smoothing (release) around English speech
-        att, rel = int(a.duck_hold * SR), int(a.duck_smooth * SR)
-        env = _smooth(np.pad(mask, (att, 0))[:N], rel)
         c0 = int(ctx * SR)
-        jp_gain = db(a.jp_db) * db(a.duck_db * env[c0:c0 + n])
-        mix = bg + voc * jp_gain[:, None] + eng[c0:c0 + n, None]
+        if jp_off:
+            mix = bg + eng[c0:c0 + n, None]
+        else:
+            # duck envelope: pre-roll (attack) and smoothing (release) around English speech
+            att, rel = int(a.duck_hold * SR), int(a.duck_smooth * SR)
+            env = _smooth(np.pad(mask, (att, 0))[:N], rel)
+            jp_gain = db(a.jp_db) * db(a.duck_db * env[c0:c0 + n])
+            mix = bg + voc * jp_gain[:, None] + eng[c0:c0 + n, None]
         peak = float(np.abs(mix).max()) if n else 0.0
         sf.write(out + '.tmp.wav', mix, SR, subtype='FLOAT'); os.replace(out + '.tmp.wav', out)
         atomic_json(meta, dict(sig=sig, peak=peak))

@@ -5,7 +5,7 @@ Voiceover Studio turns videos with **burned-in English subtitles** (for example 
 1. It reads the subtitles from the picture with OCR.
 2. It separates the Japanese voices from the music and effects with Demucs.
 3. It speaks the subtitles with Kokoro voices. Yellow subtitles get the dialogue voice and cyan subtitles get the narrator voice.
-4. It mixes the English voice over a quieter, ducked Japanese track.
+4. It mixes the English voice over the music and effects. By default the Japanese voices are left out of the English track; you can bring them back in **Settings > Mix**. The original Japanese audio is always kept as a second audio track.
 5. It writes an .mp4 to `~/Movies/Voiceover`.
 
 **Requirements: a Mac with Apple Silicon (M1 or newer) running macOS 12 or later. Intel Macs are not supported.**
@@ -43,7 +43,7 @@ The setup screen also has an unticked **Cloned voices (Chatterbox)** checkbox. L
 - **Add videos.** Paste one or more YouTube video or playlist URLs and click **Add to queue**. A playlist is expanded into one queue item per video. **Add local videos…** adds files from your Mac.
 - **Process only part of a video.** Fill in *Only process start/end* before adding, for example `4:20` to `6:20`.
 - **Watch progress.** The queue runs one item at a time: download, OCR, voice separation, speech, mix, then writing the video. Each item shows its stage and percentage.
-- **Manage the queue.** You can reorder (↑ ↓), stop, retry, remove and view the log (≡) for each item. **Pause queue** stops new items from starting.
+- **Manage the queue.** You can reorder (⤒ moves an item to the top of the waiting items, right after the video being processed, without interrupting it; ↑ ↓ move it one place), stop, retry, remove and view the log (≡) for each item. **Pause queue** stops new items from starting.
 - **Pick up after quitting.** If you quit mid-video, the queue is saved. On the next launch it continues from the last finished stage of that video.
 - **"No hardsubs found".** An item is marked this way when OCR finds almost no subtitle lines in it. Soft subtitles that you can switch on or off in the player don't count.
 - **Where the output goes.** Each finished video is saved as `<title> (English VO).mp4` in the output folder. Its OCR subtitle files go in the `Subtitles/` subfolder. If **keep source** is on, the downloaded original goes in `Sources/`.
@@ -52,17 +52,18 @@ The setup screen also has an unticked **Cloned voices (Chatterbox)** checkbox. L
 
 Cloned voices speak the English lines **in the voices of the original Japanese actors** (so with their accent), using [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT licence) locally on your Mac.
 
-- **Install:** tick the box on the first-run screen, or later use **Settings > Voices > Cloned voices > Install**. It goes into its own Python environment (`clone-venv`) plus the model (`hf/`) inside the app's data folder: about 4 GB (0.8 GB of Python packages + 3.2 GB model; about 2 minutes on a fast connection) in total. The standard install is not changed. **Remove** deletes both.
+- **Install:** tick the box on the first-run screen, or later use **Settings > Voices > Cloned voices > Install**. It goes into its own Python environment (`clone-venv`) plus the model (`models/chatterbox`) inside the app's data folder: about 4 GB (0.8 GB of Python packages + 3.2 GB model; about 2 minutes on a fast connection) in total. The standard install is not changed. **Remove** deletes both.
 - **Use:** tick **Use cloned voices** before adding videos, or switch it per queued item. **Settings > Voices** has a default for new videos (off).
 - **How it works:** speakers are grouped automatically by voice fingerprint from the separated Japanese voice track. The narrator (cyan) gets its own voice. Each speaker gets a 6–10 s reference clip of their clean speech. Lines are fitted into the same subtitle slots as the standard voices. A line that can't be cloned uses the standard voice for its colour, and the item's log says so.
 - **Speed:** generation runs on the GPU (MPS) with CPU fallback. It is much slower than the standard voices: on an M3 Max, Chatterbox needs about 1.8 s of GPU time per second of speech, so a 4-minute sample took 4.3 minutes instead of 1.3, and a 24-minute episode takes roughly 20–25 minutes longer.
+- **German accent (optional):** **Settings > Voices > Accent of cloned voices** sets the default (Original or German), and each queued video has its own **German accent / Original accent** button. German uses Chatterbox Multilingual (language `de`) reading the English text in the same cloned voices. It needs a one-time extra download of about 2.1 GB into the same model folder; this starts the first time you choose German, or use **Download now**. **Remove** deletes it with the rest. Each line falls back to the original-accent clone if the German model can't do it (very short lines such as "And..."), then to the standard voice; the log notes every fallback. It is slower: on an M3 Max about 2.5 s of GPU time per second of speech once running, and the 4-minute sample took 8.9 minutes (original accent: 4.7 minutes) including one retry and one fallback. The accent is subtle and varies by line, and the speech is somewhat less clear than with the original accent.
 - **Limits:** grouping by voice is automatic and can mix up similar-sounding characters or split one character in two. Short lines are assigned from the conversation context. Chatterbox output carries Resemble AI's inaudible watermark.
 
 ### Settings
 
 - **Output folder.**
 - **Voices.** Choose the voice for each subtitle colour: dialogue (yellow), narrator (cyan), and song lyrics (white; not voiced by default). Install or remove cloned voices and set whether new videos use them.
-- **Levels.** Japanese voice level (default −15 dB), extra ducking under English (−9 dB), and English level.
+- **Levels.** Japanese voice level (default **Off**: the slider all the way left leaves the Japanese voices out of the English track, so there's no ducking either; older versions used −15 dB, and installs still on that default switch to Off when updating), extra ducking under English (−9 dB, only used when the Japanese voices are on), and English level.
 - **Output video.**
   - **H.264** (default) re-encodes with the Mac's hardware encoder and plays everywhere.
   - **Copy** is faster, but YouTube's AV1 video needs IINA/VLC or an M3-or-newer Mac to play.

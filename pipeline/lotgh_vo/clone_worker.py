@@ -1,7 +1,9 @@
 """Cloned-voice worker. Runs ONLY in the optional Chatterbox venv (never imported by the base pipeline).
 
 python -m lotgh_vo.clone_worker JOB.json      -> speaker grouping, reference clips, one Chatterbox wav per line
-python -m lotgh_vo.clone_worker --selftest    -> load the model, synthesise one sentence, print device + speed
+python -m lotgh_vo.clone_worker --selftest [auto|mps|cpu] [de]  -> load the model, synthesise, print device + speed
+python -m lotgh_vo.clone_worker --download DEST     -> English model files (~3.2 GB) into DEST
+python -m lotgh_vo.clone_worker --download-de DEST  -> extra German-accent files (~2.1 GB) into DEST
 
 Talks to the parent (lotgh_vo.clone) through stdout lines that start with 'CLONE ' followed by JSON.
 """
@@ -11,6 +13,11 @@ import numpy as np
 REPO_ID = 'ResembleAI/chatterbox'
 REVISION = '5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18'   # pinned model snapshot (~3.2 GB)
 MODEL_FILES = ['ve.safetensors', 't3_cfg.safetensors', 's3gen.safetensors', 'tokenizer.json', 'conds.pt']
+# German accent = Chatterbox Multilingual with language_id='de' reading the English text. Only its text-to-speech-token
+# model and tokenizer are extra: the voice encoder and S3Gen weights are identical to the English files above
+# (checked tensor by tensor), so they are shared instead of downloading ve.pt / s3gen.pt again.
+DE_FILES = {'t3_mtl23ls_v2.safetensors': 2143989752, 'grapheme_mtl_merged_expanded_v1.json': 69989}
+ACCENTS = {'german': 'de'}
 SR_IN = 44100
 MIN_SPEECH_EMB = 0.6     # s of speech needed to fingerprint a line
 TIE_MARGIN = 0.02        # cosine margin below which the top-2 speakers count as a tie
@@ -44,6 +51,40 @@ def download(dest):
     missing = [f for f in MODEL_FILES if not os.path.exists(os.path.join(dest, f))]
     if missing: raise RuntimeError(f'model files missing after download: {missing}')
     return dest
+
+def download_de(dest):
+    from huggingface_hub import hf_hub_download
+    for f in DE_FILES: hf_hub_download(REPO_ID, f, revision=REVISION, local_dir=dest)
+    shutil.rmtree(os.path.join(dest, '.cache'), ignore_errors=True)
+    bad = [f for f, n in DE_FILES.items() if not os.path.exists(os.path.join(dest, f)) or os.path.getsize(os.path.join(dest, f)) != n]
+    if bad: raise RuntimeError(f'German-accent files missing or incomplete after download: {bad}')
+    return dest
+
+def de_dir():
+    d = os.environ.get('LOTGH_CLONE_MODEL')
+    if d and all(os.path.exists(os.path.join(d, f)) for f in DE_FILES): return d
+    from huggingface_hub import hf_hub_download
+    p = None
+    for f in DE_FILES: p = hf_hub_download(REPO_ID, f, revision=REVISION)
+    return os.path.dirname(p)
+
+def load_accent(model, dev):
+    """Multilingual T3 + tokenizer on top of the already-loaded English model's voice encoder and S3Gen."""
+    from safetensors.torch import load_file
+    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+    from chatterbox.models.t3 import T3
+    from chatterbox.models.t3.modules.t3_config import T3Config
+    from chatterbox.models.tokenizers import tokenizer as tkm
+    # Chinese helpers are not needed for German; without this the tokenizer tries to fetch a Cangjie table into the
+    # model folder and to import a Chinese word segmenter.
+    tkm.ChineseCangjieConverter._load_cangjie_mapping = lambda self, model_dir=None: None
+    tkm.ChineseCangjieConverter._init_segmenter = lambda self: None
+    d = de_dir()
+    t3 = T3(T3Config.multilingual()); st = load_file(os.path.join(d, 't3_mtl23ls_v2.safetensors'))
+    if 'model' in st.keys(): st = st['model'][0]
+    t3.load_state_dict(st); t3.to(dev).eval(); del st
+    tok = tkm.MTLTokenizer(os.path.join(d, 'grapheme_mtl_merged_expanded_v1.json'))
+    return ChatterboxMultilingualTTS(t3, model.s3gen, model.ve, tok, dev)
 
 def load_model(pref):
     import torch
@@ -177,6 +218,11 @@ def build_ref(lines, cent, path):
     return dict(lines=used, dur=round(dur, 2), hash=hsh, path=out, snr=snr)
 
 # ------------------------------------------------------------------ generation
+def gen_key(job, text, ref_hash, accent):
+    """Cache key of one generated line. The original accent keeps the v0.2.0 key so existing caches stay valid."""
+    parts = [job['version'], text, ref_hash, job['seed'], job['exaggeration'], job['cfg']] + ([accent] if accent else [])
+    return hashlib.sha1('|'.join(map(str, parts)).encode()).hexdigest()[:16]
+
 def expected_len(text): return 0.5 + 0.065 * len(text)
 
 def speakable(text):
@@ -187,11 +233,23 @@ def speakable(text):
     if not t: return text
     return t[0].upper() + t[1:]
 
-def synth(model, text, seed, exaggeration, cfg):
+def synth(model, text, seed, exaggeration, cfg, lang=None):
     import torch
     torch.manual_seed(seed)
-    w = model.generate(speakable(text), exaggeration=exaggeration, cfg_weight=cfg)
+    if lang: w = model.generate(speakable(text), language_id=lang, exaggeration=exaggeration, cfg_weight=cfg)
+    else: w = model.generate(speakable(text), exaggeration=exaggeration, cfg_weight=cfg)
     return w.squeeze(0).detach().cpu().numpy().astype(np.float32), model.sr
+
+def bad_len(d, text): return d < 0.25 or d > 2.5 * expected_len(text)
+
+def synth_checked(model, text, seed, exaggeration, cfg, lang=None, label=''):
+    """One retry with another seed when the length is implausible (silence or run-on babble)."""
+    w, sr = synth(model, text, seed, exaggeration, cfg, lang); d = len(w) / sr
+    if bad_len(d, text):
+        say(f'{label}: suspicious length {d:.1f}s, retrying with another seed')
+        w, sr = synth(model, text, seed + 7919, exaggeration, cfg, lang); d = len(w) / sr
+        if bad_len(d, text): raise RuntimeError(f'bad output length {d:.1f}s')
+    return w, sr
 
 def run_job(job):
     import soundfile as sf
@@ -201,6 +259,13 @@ def run_job(job):
     emit(ev='phase', name='load'); t = time.time()
     model, dev = load_model(job.get('device', 'auto'))
     say(f'Chatterbox loaded on {dev.upper()} in {time.time() - t:.0f}s')
+    accent = job.get('accent') or 'original'; lang = ACCENTS.get(accent); amodel = None
+    if lang:
+        try:
+            t = time.time(); amodel = load_accent(model, dev)
+            say(f'{accent.capitalize()} accent model loaded in {time.time() - t:.0f}s')
+        except Exception as e:
+            say(f'{accent} accent model could not be loaded ({str(e)[:200]}); using the original-accent clones'); lang = None
     lines = job['lines']
     emit(ev='phase', name='speakers'); t = time.time()
     fingerprint(model, lines, voc, Vocals(job['chunks'], stem=3))
@@ -228,44 +293,69 @@ def run_job(job):
     for L in lines:
         r = refs.get(L['spk']) or {}
         if not r.get('hash'): res[L['i']] = dict(error=f"no reference for {L['spk']}"); continue
-        key = hashlib.sha1('|'.join(map(str, (job['version'], L['text'], r['hash'], job['seed'], job['exaggeration'],
-                                              job['cfg']))).encode()).hexdigest()[:16]
-        L['key'] = key; L['out'] = os.path.join(gdir, f'{key}.wav')
-        if os.path.exists(L['out']): res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'], cached=True)
-        else: todo.append(L)
+        L['key'] = gen_key(job, L['text'], r['hash'], None); L['out'] = os.path.join(gdir, f"{L['key']}.wav")
+        if lang:
+            L['akey'] = gen_key(job, L['text'], r['hash'], accent); L['aout'] = os.path.join(gdir, f"{L['akey']}.wav")
+            if os.path.exists(L['aout']): res[L['i']] = dict(path=L['aout'], spk=L['spk'], ref=r['hash'], accent=accent, cached=True); continue
+        elif os.path.exists(L['out']): res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'], cached=True); continue
+        todo.append(L)
     emit(ev='gen_start', total=len(todo), cached=len(res) - sum(1 for v in res.values() if 'error' in v))
-    cur = None; gen_t = 0.0; gen_a = 0.0
+    cur = {}; gen_t = 0.0; gen_a = 0.0; n_acc = n_acc_fb = 0
+    def prep(m, r):
+        if cur.get(id(m)) != r['hash']: m.prepare_conditionals(r['path'], exaggeration=job['exaggeration']); cur[id(m)] = r['hash']
+    def save(w, sr, out):
+        sf.write(out + '.tmp.wav', w, sr, subtype='FLOAT'); os.replace(out + '.tmp.wav', out)
     for L in sorted(todo, key=lambda L: (L['spk'], L['s'])):
-        r = refs[L['spk']]
-        try:
-            if cur != r['hash']: model.prepare_conditionals(r['path'], exaggeration=job['exaggeration']); cur = r['hash']
-            seed = (job['seed'] + int(L['key'][:8], 16)) % 2 ** 31
-            t = time.time(); w, sr = synth(model, L['text'], seed, job['exaggeration'], job['cfg'])
-            d = len(w) / sr
-            if d < 0.25 or d > 2.5 * expected_len(L['text']):          # silence or run-on babble: one retry
-                say(f"line {L['i'] + 1}: suspicious length {d:.1f}s, retrying with another seed")
-                w, sr = synth(model, L['text'], seed + 7919, job['exaggeration'], job['cfg']); d = len(w) / sr
-                if d < 0.25 or d > 2.5 * expected_len(L['text']): raise RuntimeError(f'bad output length {d:.1f}s')
-            gen_t += time.time() - t; gen_a += d
-            sf.write(L['out'] + '.tmp.wav', w, sr, subtype='FLOAT'); os.replace(L['out'] + '.tmp.wav', L['out'])
-            res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'])
-        except Exception as e:
-            res[L['i']] = dict(error=str(e)[:300]); say(f"line {L['i'] + 1}: Chatterbox failed: {str(e)[:200]}")
+        r = refs[L['spk']]; t = time.time(); d = 0.0
+        if lang:          # accent first; on any failure the original-accent clone, then (in the parent) Kokoro
+            try:
+                prep(amodel, r)
+                w, sr = synth_checked(amodel, L['text'], (job['seed'] + int(L['akey'][:8], 16)) % 2 ** 31, job['exaggeration'],
+                                      job['cfg'], lang, f"line {L['i'] + 1} ({accent})")
+                d = len(w) / sr; save(w, sr, L['aout']); n_acc += 1
+                res[L['i']] = dict(path=L['aout'], spk=L['spk'], ref=r['hash'], accent=accent)
+            except Exception as e:
+                n_acc_fb += 1
+                say(f"line {L['i'] + 1}: {accent} accent failed ({type(e).__name__}: {str(e)[:160]}); using the original-accent clone")
+        if L['i'] not in res:
+            try:
+                if os.path.exists(L['out']):
+                    res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'], cached=True)
+                else:
+                    prep(model, r)
+                    w, sr = synth_checked(model, L['text'], (job['seed'] + int(L['key'][:8], 16)) % 2 ** 31, job['exaggeration'],
+                                          job['cfg'], None, f"line {L['i'] + 1}")
+                    d += len(w) / sr; save(w, sr, L['out'])
+                    res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'])
+                if lang: res[L['i']]['accent_fallback'] = True
+            except Exception as e:
+                res[L['i']] = dict(error=str(e)[:300]); say(f"line {L['i'] + 1}: Chatterbox failed: {str(e)[:200]}")
+        if d: gen_t += time.time() - t; gen_a += d
         emit(ev='gen_step', done=L['i'], rtf=round(gen_t / gen_a, 2) if gen_a else None)
-    emit(ev='done', results=res, device=dev, rtf=round(gen_t / gen_a, 2) if gen_a else None,
+    if lang: say(f"{accent} accent: {n_acc} lines generated, {sum(1 for v in res.values() if v.get('cached') and v.get('accent'))}"
+                 f' from cache, {n_acc_fb} fell back to the original accent')
+    emit(ev='done', results=res, device=dev, accent=accent if lang else 'original', rtf=round(gen_t / gen_a, 2) if gen_a else None,
          gen_s=round(gen_t, 1), audio_s=round(gen_a, 1), total_s=round(time.time() - t_all, 1))
 
-def selftest(pref):
+def selftest(pref, accent=None):
     t = time.time(); model, dev = load_model(pref); tl = time.time() - t
-    w, sr = synth(model, 'Testing cloned voices.', 1, 0.5, 0.5)            # built-in voice; warms up
-    t = time.time(); w, sr = synth(model, 'The war has already been going on for one hundred and fifty years.', 1, 0.5, 0.5)
+    lang = None
+    if accent:
+        lang = ACCENTS.get(accent, accent); t = time.time(); m = load_accent(model, dev); tl += time.time() - t
+        m.conds = model.conds                         # built-in voice
+    else: m = model
+    w, sr = synth(m, 'Testing cloned voices.', 1, 0.5, 0.5, lang)            # warms up
+    t = time.time(); w, sr = synth(m, 'The war has already been going on for one hundred and fifty years.', 1, 0.5, 0.5, lang)
     g = time.time() - t
-    print(f'chatterbox ok device={dev} load={tl:.1f}s rtf={g / (len(w) / sr):.2f}', flush=True)
+    print(f"chatterbox ok device={dev} load={tl:.1f}s rtf={g / (len(w) / sr):.2f}" + (f' accent={accent}' if accent else ''), flush=True)
 
 if __name__ == '__main__':
     import warnings; warnings.filterwarnings('ignore')
     os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
-    if sys.argv[1] == '--selftest': selftest(sys.argv[2] if len(sys.argv) > 2 else 'auto'); sys.exit(0)
+    if sys.argv[1] == '--selftest':
+        selftest(sys.argv[2] if len(sys.argv) > 2 else 'auto', sys.argv[3] if len(sys.argv) > 3 else None); sys.exit(0)
+    if sys.argv[1] == '--download-de':
+        os.environ.pop('HF_HUB_OFFLINE', None); print(download_de(sys.argv[2]), flush=True); sys.exit(0)
     if sys.argv[1] == '--download':
         os.environ.pop('HF_HUB_OFFLINE', None); print(download(sys.argv[2]), flush=True); sys.exit(0)
     try:

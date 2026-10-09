@@ -9,7 +9,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 APP_NAME = 'Voiceover Studio'
-VERSION = '0.2.0'
+VERSION = '0.3.0'
 KOKORO_FILES = [
     ('kokoro-v1.0.fp16.onnx', 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx', 177464787),
     ('voices-v1.0.bin', 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin', 28214398),
@@ -21,6 +21,11 @@ CLONE_STAGE_WEIGHTS = [('ocr', 0.14), ('separate', 0.06), ('clone', 0.74), ('tts
 # optional cloned voices (Chatterbox): separate venv + model, only when the user opts in
 CLONE_REPO = 'ResembleAI/chatterbox'
 CLONE_FILES_BYTES = 3191366992            # ve + t3_cfg + s3gen + tokenizer + conds at the pinned revision
+# German accent (Chatterbox Multilingual): extra T3 model + tokenizer in the same model folder, same pinned revision
+DE_FILES = {'t3_mtl23ls_v2.safetensors': 2143989752, 'grapheme_mtl_merged_expanded_v1.json': 69989}
+DE_FILES_BYTES = sum(DE_FILES.values())
+ACCENTS = ('original', 'german')
+JP_OFF = -41                              # Japanese-voices slider at its minimum = off (stem left out, no ducking)
 VIDEO_EXT = ('.mkv', '.webm', '.mp4', '.mov', '.m4v', '.avi')
 
 # ----------------------------------------------------------------------------------------------------------------
@@ -77,8 +82,8 @@ def load(path, default):
 
 def default_settings():
     return dict(output_dir=os.path.expanduser('~/Movies/Voiceover'), voice_dialogue='bm_daniel', voice_narrator='bm_lewis',
-                voice_lyrics='skip', jp_db=-15, duck_db=-9, tts_db=0, keep_source=False, video_codec='h264',
-                cookies='none', max_height=720, clone_default=False, clone_optin=False)
+                voice_lyrics='skip', jp_db=JP_OFF, duck_db=-9, tts_db=0, keep_source=False, video_codec='h264',
+                cookies='none', max_height=720, clone_default=False, clone_optin=False, clone_accent='original')
 
 def save_queue():
     with LOCK:
@@ -278,17 +283,36 @@ def dir_size(p):
                 except OSError: pass
     return tot
 
+def de_ready():
+    return clone_ready() and os.path.exists(os.path.join(P.data, 'clone_de_done.json')) and all(
+        os.path.exists(os.path.join(P.cmodel, f)) and os.path.getsize(os.path.join(P.cmodel, f)) == n for f, n in DE_FILES.items())
+
+def de_refresh():
+    with LOCK:
+        cur = STATE['clone'].get('de') or {}
+        if cur.get('state') == 'installing': return
+        if de_ready():
+            de = {'state': 'ready', 'size': sum(DE_FILES.values()),
+                  'info': load(os.path.join(P.data, 'clone_de_done.json'), {}).get('selftest', '')}
+        else:
+            de = {'state': 'error' if cur.get('state') == 'error' else 'absent', 'error': cur.get('error', ''),
+                  'size': DE_FILES_BYTES}
+        STATE['clone']['de'] = de
+    CHANGED.set()
+
 def clone_refresh():
     with LOCK:
         if STATE['clone'].get('state') in ('installing', 'removing'): return
         if clone_ready():
             STATE['clone'] = {'state': 'ready', 'detail': '', 'size': dir_size(P.cvenv) + dir_size(P.cmodel),
-                              'info': load(os.path.join(P.data, 'clone_done.json'), {}).get('selftest', '')}
+                              'info': load(os.path.join(P.data, 'clone_done.json'), {}).get('selftest', ''),
+                              'de': STATE['clone'].get('de') or {}}
         else:
             partial = os.path.exists(P.cvenv) or os.path.exists(P.cmodel)
             STATE['clone'] = {'state': 'error' if STATE['clone'].get('state') == 'error' else 'absent',
                               'error': STATE['clone'].get('error', ''), 'partial': partial,
-                              'size': (dir_size(P.cvenv) + dir_size(P.cmodel)) if partial else 0}
+                              'size': (dir_size(P.cvenv) + dir_size(P.cmodel)) if partial else 0, 'de': {'state': 'absent'}}
+    if STATE['clone'].get('state') == 'ready': de_refresh()
     CHANGED.set()
 
 def cset(**kw):
@@ -300,14 +324,14 @@ def cset(**kw):
             if kw.get('state') in ('ready', 'error'): st['state'] = 'done' if kw['state'] == 'ready' else 'error'
     CHANGED.set()
 
-def _clone_logged(cmd, env=None):
+def _clone_logged(cmd, env=None, set_status=None):
     logf = open(os.path.join(P.logs, 'clone_setup.log'), 'a')
     logf.write(f"\n$ {' '.join(cmd)}\n"); logf.flush()
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env or env_for_tools(), bufsize=1)
     last = ''
     for line in p.stdout:
         logf.write(line); line = line.strip()
-        if line: last = line; cset(detail=line[-160:])
+        if line: last = line; (set_status or cset)(detail=line[-160:])
     p.wait(); logf.close()
     if p.returncode != 0: raise RuntimeError(f'{os.path.basename(cmd[0])} failed: {last[-300:]}')
     return last
@@ -349,17 +373,63 @@ def do_clone_install():
     finally:
         CLONE_LOCK.release()
 
+DE_LOCK = threading.Lock()
+def dset(**kw):
+    with LOCK: STATE['clone'].setdefault('de', {}).update(kw)
+    CHANGED.set()
+
+def do_de_install():
+    """German accent: ~2.1 GB of extra model files into the cloned-voices model folder + a self-test.
+    Blocks until done if another thread is already installing it. Returns True when ready."""
+    if de_ready(): return True
+    if not clone_ready(): return False
+    if not DE_LOCK.acquire(blocking=False):
+        with DE_LOCK: return de_ready()
+    try:
+        if de_ready(): return True
+        dset(state='installing', error='', pct=0.0, detail='downloading the German-accent model')
+        log('German accent: install started')
+        done = threading.Event(); xet = os.path.join(P.data, 'hf', 'xet'); x0 = dir_size(xet); m0 = dir_size(P.cmodel)
+        def watch():
+            while not done.wait(1.0):
+                sz = max(0, dir_size(P.cmodel) - m0) + max(0, dir_size(xet) - x0)
+                dset(pct=min(99.0, 100 * sz / DE_FILES_BYTES),
+                     detail=f'downloading the German-accent model: {sz / 1e9:.1f} / {DE_FILES_BYTES / 1e9:.1f} GB')
+        threading.Thread(target=watch, daemon=True).start()
+        try: _clone_logged([P.cpy, '-m', 'lotgh_vo.clone_worker', '--download-de', P.cmodel], set_status=dset)
+        finally: done.set()
+        dset(pct=None, detail='self-test (loading the German-accent model and speaking one sentence)')
+        env = env_for_tools(); env['HF_HUB_OFFLINE'] = '1'
+        out = _clone_logged([P.cpy, '-m', 'lotgh_vo.clone_worker', '--selftest', 'auto', 'german'], env=env, set_status=dset)
+        out = (re.findall(r'chatterbox ok[^\r\n]*', out) or [out])[-1]
+        atomic_write(os.path.join(P.data, 'clone_de_done.json'), {'selftest': out, 'time': time.time()})
+        log('German accent installed: ' + out)
+        dset(state='ready', pct=100.0, detail='')
+        clone_refresh(); return True                  # also updates the total size shown for cloned voices
+    except Exception as e:
+        log('German accent install failed: ' + traceback.format_exc())
+        dset(state='error', error=str(e)[:400], pct=None, detail='')
+        return False
+    finally:
+        DE_LOCK.release()
+
+def start_de_install():
+    if clone_ready() and not de_ready() and not DE_LOCK.locked():
+        threading.Thread(target=do_de_install, daemon=True).start()
+
 def do_clone_remove():
     if not CLONE_LOCK.acquire(blocking=False): return
     try:
         cset(state='removing', detail='removing cloned voices', pct=None)
-        for p in (os.path.join(P.data, 'clone_done.json'),):
+        for p in (os.path.join(P.data, 'clone_done.json'), os.path.join(P.data, 'clone_de_done.json')):
             if os.path.exists(p): os.remove(p)
         shutil.rmtree(P.cvenv, ignore_errors=True); shutil.rmtree(P.cmodel, ignore_errors=True)
         with LOCK:
             STATE['settings']['clone_default'] = False; STATE['settings']['clone_optin'] = False
+            STATE['settings']['clone_accent'] = 'original'
             for it in STATE['items']:
                 if it['status'] in ('queued', 'error', 'stopped') and it.get('clone'): it['clone'] = False
+                if it['status'] != 'done': it['accent'] = 'original'
         save_settings(); save_queue()
         log('cloned voices removed')
         with LOCK: STATE['clone'] = {'state': 'idle'}
@@ -371,7 +441,7 @@ def do_clone_remove():
 def new_item(**kw):
     it = dict(id=uuid.uuid4().hex[:10], kind='url', url='', path='', title='', start='', end='', status='queued',
               stage='', stage_pct=0.0, pct=0.0, message='', output='', added=time.time(), updated=time.time(), lines=0,
-              clone=False)
+              clone=False, accent='original')
     it.update(kw); return it
 
 def find(iid):
@@ -386,7 +456,7 @@ def upd(it, **kw):
 
 URL_RE = re.compile(r'https?://\S+')
 
-def add_text(text, start='', end='', clone=False):
+def add_text(text, start='', end='', clone=False, accent='original'):
     added = []
     with LOCK:
         for raw in text.splitlines():
@@ -394,20 +464,21 @@ def add_text(text, start='', end='', clone=False):
             if not s: continue
             if URL_RE.match(s):
                 added.append(new_item(kind='url', url=s, title=s, status='expanding', message='Reading video info...',
-                                      start=start, end=end, clone=clone))
+                                      start=start, end=end, clone=clone, accent=accent))
             elif os.path.exists(os.path.expanduser(s)):
                 pth = os.path.abspath(os.path.expanduser(s))
-                added.append(new_item(kind='file', path=pth, title=os.path.basename(pth), start=start, end=end, clone=clone))
+                added.append(new_item(kind='file', path=pth, title=os.path.basename(pth), start=start, end=end, clone=clone,
+                                      accent=accent))
         STATE['items'].extend(added)
     save_queue()
     return len(added)
 
-def add_files(paths, start='', end='', clone=False):
+def add_files(paths, start='', end='', clone=False, accent='original'):
     with LOCK:
         for pth in paths:
             if os.path.isfile(pth):
                 STATE['items'].append(new_item(kind='file', path=pth, title=os.path.basename(pth), start=start, end=end,
-                                               clone=clone))
+                                               clone=clone, accent=accent))
     save_queue()
 
 def ytdlp_base():
@@ -438,7 +509,8 @@ def expander_loop():
                         if url and not url.startswith('http') and e.get('ie_key') == 'Youtube':
                             url = f'https://www.youtube.com/watch?v={url}'
                         new.append(new_item(kind='url', url=url, title=e.get('title') or url, start=it['start'],
-                                            end=it['end'], playlist=info.get('title') or '', clone=it.get('clone', False)))
+                                            end=it['end'], playlist=info.get('title') or '', clone=it.get('clone', False),
+                                            accent=it.get('accent', 'original')))
                     with LOCK:
                         idx = STATE['items'].index(it)
                         STATE['items'][idx:idx + 1] = new
@@ -542,6 +614,12 @@ def download(it):
     open(os.path.join(d, '.complete'), 'w').close()
     return os.path.join(d, max(have, key=lambda f: os.path.getsize(os.path.join(d, f))))
 
+def jp_arg(v):
+    """Japanese-voices level for the pipeline: 'off' at the slider minimum (or unset), else dB."""
+    try: v = float(v)
+    except (TypeError, ValueError): return 'off'
+    return 'off' if v <= JP_OFF else f'{v:g}'
+
 def voiceover(it, src, base_pct):
     s = STATE['settings']
     out_dir = os.path.expanduser(s['output_dir']); os.makedirs(out_dir, exist_ok=True)
@@ -555,13 +633,19 @@ def voiceover(it, src, base_pct):
     wd = os.path.join(P.work, it['id'])
     cmd = [P.py, '-m', 'lotgh_vo', src, '-o', out, '--workdir', wd,
            '--voices', os.path.join(P.data, 'voices.json'), '--corrections', os.path.join(P.data, 'corrections.json'),
-           '--models', P.models, '--jp-db', str(s['jp_db']), '--duck-db', str(s['duck_db']), '--tts-db', str(s.get('tts_db', 0)),
+           '--models', P.models, '--jp-db', jp_arg(s.get('jp_db')), '--duck-db', str(s['duck_db']), '--tts-db', str(s.get('tts_db', 0)),
            '--video-codec', s.get('video_codec', 'h264')]
     if s.get('voice_lyrics', 'skip') != 'skip': cmd += ['--no-skip-white']
     use_clone = bool(it.get('clone'))
     if use_clone and not clone_ready():
         use_clone = False; log(f"item {it['id']}: cloned voices requested but not installed; using Kokoro")
     if use_clone: cmd += ['--clone', '--clone-python', P.cpy]
+    if use_clone and it.get('accent') == 'german':
+        if not de_ready():
+            upd(it, status='processing', message='Downloading the German-accent model (2.1 GB)...')
+            do_de_install()
+        if de_ready(): cmd += ['--clone-accent', 'german']
+        else: log(f"item {it['id']}: German accent requested but its model is not available; using the original accent")
     if it['kind'] == 'file' and (it.get('start') or it.get('end')):
         if it.get('start'): cmd += ['--start', it['start']]
         if it.get('end'): cmd += ['--end', it['end']]
@@ -710,10 +794,15 @@ class H(BaseHTTPRequestHandler):
 
 def handle_post(path, b):
     want_clone = bool(b.get('clone')) and clone_ready()
+    accent = b.get('accent') if b.get('accent') in ACCENTS and want_clone else 'original'
+    if accent != 'original' and path in ('/api/add', '/api/add_files'): start_de_install()
     if path == '/api/add':
-        return {'added': add_text(b.get('text', ''), b.get('start', ''), b.get('end', ''), want_clone)}
+        return {'added': add_text(b.get('text', ''), b.get('start', ''), b.get('end', ''), want_clone, accent)}
     if path == '/api/add_files':
-        add_files(b.get('paths', []), b.get('start', ''), b.get('end', ''), want_clone); return None
+        add_files(b.get('paths', []), b.get('start', ''), b.get('end', ''), want_clone, accent); return None
+    if path == '/api/clone/install_de':
+        if not clone_ready(): raise ValueError('install cloned voices first')
+        start_de_install(); return None
     if path == '/api/clone/optin':                       # checkbox on the first-run screen
         with LOCK: STATE['settings']['clone_optin'] = bool(b.get('on'))
         save_settings()
@@ -727,6 +816,7 @@ def handle_post(path, b):
     if path == '/api/clone/remove':
         if CURRENT['item'] is not None and CURRENT['item'].get('clone'):
             raise ValueError('a video using cloned voices is being processed; stop it first')
+        if DE_LOCK.locked(): raise ValueError('the German-accent model is still downloading; try again when it has finished')
         threading.Thread(target=do_clone_remove, daemon=True).start(); return None
     if path == '/api/pause':
         STATE['paused'] = bool(b.get('paused')); save_queue(); return None
@@ -734,7 +824,9 @@ def handle_post(path, b):
         with LOCK:
             for k, v in b.items():
                 if k in default_settings() and k != 'clone_optin': STATE['settings'][k] = v
-            if not clone_ready(): STATE['settings']['clone_default'] = False
+            if STATE['settings'].get('clone_accent') not in ACCENTS: STATE['settings']['clone_accent'] = 'original'
+            if not clone_ready(): STATE['settings']['clone_default'] = False; STATE['settings']['clone_accent'] = 'original'
+        if STATE['settings']['clone_accent'] != 'original': start_de_install()     # first time German is chosen
         save_settings(); return None
     if path == '/api/setup/retry':
         if STATE['setup'].get('state') != 'running': threading.Thread(target=do_setup, daemon=True).start()
@@ -768,10 +860,21 @@ def handle_post(path, b):
         elif act in ('clone_on', 'clone_off') and not running and it['status'] != 'done':
             if act == 'clone_on' and not clone_ready(): raise ValueError('cloned voices are not installed')
             with LOCK: it['clone'] = act == 'clone_on'
-        elif act in ('up', 'down', 'top'):
+        elif act in ('accent_german', 'accent_original') and not running and it['status'] != 'done':
+            if act == 'accent_german' and not clone_ready(): raise ValueError('cloned voices are not installed')
+            with LOCK: it['accent'] = act.split('_')[1]
+            if act == 'accent_german': start_de_install()
+        elif act == 'top':
+            # top of the pending queue: right after the running item (which keeps going), else the very top
+            if running or it['status'] == 'done': raise ValueError('only waiting items can be moved to the top')
+            with LOCK:
+                cur = CURRENT['item']; r = items.index(cur) if cur is not None and cur in items else -1
+                items.pop(i)
+                items.insert(r + 1 if 0 <= r < i else 0, it)
+        elif act in ('up', 'down'):
             with LOCK:
                 items.pop(i)
-                j = 0 if act == 'top' else max(0, i - 1) if act == 'up' else min(len(items), i + 1)
+                j = max(0, i - 1) if act == 'up' else min(len(items), i + 1)
                 items.insert(j, it)
         save_queue(); return None
     raise ValueError('unknown endpoint')
@@ -798,7 +901,13 @@ def main():
     ap.add_argument('--watch-parent', action='store_true')
     a = ap.parse_args()
     P = Paths(a)
-    s = default_settings(); s.update(load(os.path.join(P.data, 'settings.json'), {}))
+    saved = load(os.path.join(P.data, 'settings.json'), {})
+    s = default_settings(); s.update(saved)
+    if saved and not saved.get('mix_v3'):
+        # v0.3.0: the Japanese voices are left out of the English mix by default. Users still on the old default
+        # (-15 dB) move to Off; a level they chose themselves is kept.
+        if saved.get('jp_db', -15) == -15: s['jp_db'] = JP_OFF
+    s['mix_v3'] = True
     STATE['settings'] = s; save_settings()
     if not os.path.exists(os.path.join(P.data, 'corrections.json')):
         shutil.copy(os.path.join(P.pipeline, 'config', 'corrections.json'), os.path.join(P.data, 'corrections.json'))
@@ -811,7 +920,7 @@ def main():
     old_cache = os.path.join(P.data, 'uv-cache')                # left by v1.0.0 installs (~1 GB)
     if os.path.isdir(old_cache):
         threading.Thread(target=lambda: (shutil.rmtree(old_cache, ignore_errors=True), log('removed old uv-cache')), daemon=True).start()
-    for it in STATE['items']: it.setdefault('clone', False)
+    for it in STATE['items']: it.setdefault('clone', False); it.setdefault('accent', 'original')
     clone_refresh()
     srv = ThreadingHTTPServer(('127.0.0.1', a.port), H)
     for fn in (do_setup, expander_loop, worker_loop):

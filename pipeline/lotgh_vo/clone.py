@@ -3,7 +3,9 @@
 Runs lotgh_vo.clone_worker in the separate Chatterbox venv (--clone-python): speakers are grouped from the Demucs
 vocals stem by voice fingerprint, each gets a 6-10 s reference clip (the narrator gets its own from cyan lines), and
 every line is generated in its speaker's voice. Here each line is then fitted to its subtitle slot exactly like
-Kokoro lines (trim, speed-up <= max_tempo, no overlap). Lines that fail fall back to Kokoro (run_tts)."""
+Kokoro lines (trim, speed-up <= max_tempo, no overlap). Lines that fail fall back to Kokoro (run_tts).
+With --clone-accent german the worker reads the English text with Chatterbox Multilingual (language 'de');
+fallback order per line: German clone -> original-accent clone -> Kokoro, each logged."""
 import json, os, subprocess, sys
 import numpy as np, soundfile as sf
 from .util import FFMPEG, log, Progress, atomic_json, h, run
@@ -37,9 +39,11 @@ def run_clone(a, lines, classes, chunks, dur, wd):
                        role='narrator' if classes[i] in NARRATOR_CLASSES else 'dialogue'))
     if not jl: return {}
     job = dict(version=CLONE_VERSION, seed=CLONE_SEED, exaggeration=EXAGGERATION, cfg=CFG, device=a.clone_device,
-               dir=cdir, lines=jl, chunks=[list(c) for c in chunks])
+               dir=cdir, lines=jl, chunks=[list(c) for c in chunks], accent=getattr(a, 'clone_accent', 'original'))
     jp = os.path.join(cdir, 'job.json'); atomic_json(jp, job)
-    log('clone', f'cloned voices (Chatterbox) for {len(jl)} lines; Kokoro is used for any line that fails')
+    acc = job['accent'] if job['accent'] != 'original' else ''
+    log('clone', f"cloned voices (Chatterbox{', ' + acc + ' accent' if acc else ''}) for {len(jl)} lines; "
+                 + (f'the original-accent clone, then Kokoro, is used for any line that fails' if acc else 'Kokoro is used for any line that fails'))
     env = dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK='1', HF_HUB_OFFLINE='1', TOKENIZERS_PARALLELISM='false', TQDM_DISABLE='1')
     res, pr, info = None, None, {}
     try:
@@ -78,14 +82,19 @@ def run_clone(a, lines, classes, chunks, dur, wd):
         f = os.path.join(fdir, f'{key}.wav')
         try:
             meta = _fit(r['path'], L['slot'], a.max_tempo, f) if not os.path.exists(f) else {}
-            out[L['i']] = dict(out=f, meta=dict(meta, clone=r['spk'], ref=r['ref']))
+            out[L['i']] = dict(out=f, meta=dict(meta, clone=r['spk'], ref=r['ref'], accent=r.get('accent', 'original')))
         except Exception as e:
             failed.append((L['i'], f'fit failed: {e}'))
     for i, why in failed:
         log('clone', f'line {i + 1}: using Kokoro {lines[i][3]} instead ({str(why)[:160]})')
     atomic_json(os.path.join(cdir, 'clone_report.json'), dict(device=res.get('device'), rtf=res.get('rtf'),
                 gen_s=res.get('gen_s'), audio_s=res.get('audio_s'), total_s=res.get('total_s'),
-                speakers=info.get('speakers'), lines=info.get('lines'), fallback=[i for i, _ in failed]))
+                speakers=info.get('speakers'), lines=info.get('lines'), fallback=[i for i, _ in failed],
+                accent=job['accent'], accent_lines=sorted(i for i, v in out.items() if v['meta']['accent'] != 'original'),
+                accent_fallback=sorted(int(i) for i, r in res['results'].items() if r.get('accent_fallback'))))
+    if acc:
+        n_acc = sum(1 for v in out.values() if v['meta']['accent'] != 'original')
+        log('clone', f'{n_acc} lines with {acc} accent, {len(out) - n_acc} with the original accent')
     log('clone', f"{len(out)} lines cloned, {len(failed)} on Kokoro; Chatterbox on {str(res.get('device')).upper()}, "
                  f"{res.get('gen_s')}s to generate {res.get('audio_s')}s of speech ({res.get('rtf') or 0:.2f}s per second of speech)")
     return out
