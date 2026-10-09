@@ -5,7 +5,7 @@ Voiceover Studio turns videos with **burned-in English subtitles** (for example 
 1. It reads the subtitles from the picture with OCR.
 2. It separates the Japanese voices from the music and effects with Demucs.
 3. It speaks the subtitles with Kokoro voices. Yellow subtitles get the dialogue voice and cyan subtitles get the narrator voice.
-4. It mixes the English voice over the music and effects. By default the Japanese voices are left out of the English track; you can bring them back in **Settings > Mix**. The original Japanese audio is always kept as a second audio track.
+4. It mixes the English voice over the music and effects. By default the Japanese voices are left out of the English track, except the singing in opening/ending songs, which stays at full level; you can change both in **Settings > Mix**. The original Japanese audio is always kept as a second audio track.
 5. It writes an .mp4 to `~/Movies/Voiceover`.
 
 **Requirements: a Mac with Apple Silicon (M1 or newer) running macOS 12 or later. Intel Macs are not supported.**
@@ -63,7 +63,7 @@ Cloned voices speak the English lines **in the voices of the original Japanese a
 
 - **Output folder.**
 - **Voices.** Choose the voice for each subtitle colour: dialogue (yellow), narrator (cyan), and song lyrics (white; not voiced by default). Install or remove cloned voices and set whether new videos use them.
-- **Levels.** Japanese voice level (default **Off**: the slider all the way left leaves the Japanese voices out of the English track, so there's no ducking either; older versions used −15 dB, and installs still on that default switch to Off when updating), extra ducking under English (−9 dB, only used when the Japanese voices are on), and English level.
+- **Levels.** Japanese voice level (default **Off**: the slider all the way left leaves the Japanese voices out of the English track, so there's no ducking either; older versions used −15 dB, and installs still on that default switch to Off when updating), extra ducking under English (−9 dB, only used when the Japanese voices are on), **Keep song vocals** (default on: during songs with white lyric subtitles the Japanese vocals play at full level with no ducking, whatever the Japanese voice level; songs without lyric subtitles follow the Japanese voice level), and English level.
 - **Output video.**
   - **H.264** (default) re-encodes with the Mac's hardware encoder and plays everywhere.
   - **Copy** is faster, but YouTube's AV1 video needs IINA/VLC or an M3-or-newer Mac to play.

@@ -16,8 +16,25 @@ def _smooth(x, w):
     """Triangular smoothing (two box filters, O(n)) - same shape as the old Hann convolution, ~1000x faster."""
     return np.clip(_box(_box(x, w // 2), w // 2), 0, 1)
 
+SONG_FADE = 0.25        # s, raised-cosine fade at the edges of a song span (inside its 1 s padding)
+
+def song_weight(spans, t0, n):
+    """0..1 per sample from t0: 1 inside song spans, smooth fades at the edges, 0 elsewhere (None if no overlap)."""
+    w = None; f = int(SONG_FADE * SR)
+    for x, y in spans:
+        a, b = int(round((x - t0) * SR)), int(round((y - t0) * SR))
+        if b <= 0 or a >= n: continue
+        if w is None: w = np.zeros(n, np.float32)
+        ramp = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, f, dtype=np.float32))
+        seg = np.ones(b - a, np.float32)
+        k = min(f, (b - a) // 2); seg[:k] = ramp[:k]; seg[len(seg) - k:] = ramp[:k][::-1]
+        lo, hi = max(0, a), min(n, b)
+        w[lo:hi] = np.maximum(w[lo:hi], seg[lo - a:hi - a])
+    return w
+
 def mix_sig(a, chunks, place):
-    return h('mix3', 'off' if a.jp_db is None else a.jp_db, a.duck_db, a.tts_db, a.duck_hold, a.duck_smooth, len(chunks), a.sep_chunk, a.abitrate,
+    songs = getattr(a, 'song_spans', None) or []
+    return h('mix3', 'off' if a.jp_db is None else a.jp_db, *(['songs', songs] if songs else []), a.duck_db, a.tts_db, a.duck_hold, a.duck_smooth, len(chunks), a.sep_chunk, a.abitrate,
              *[f'{p[0]:.3f}:{os.path.basename(p[2])}' for p in place])
 
 def final_mix_path(wd): return os.path.join(wd, 'mix', 'english_mix.m4a')
@@ -41,7 +58,8 @@ def run_mix(a, chunks, place, wd):
             outs.append(out); peaks.append(m['peak']); pr.step(); continue
         jp_off = a.jp_db is None                              # Japanese voices left out: background + English only
         bg, _ = sf.read(bp, dtype='float32')
-        if jp_off: voc = None; n = min(sf.info(vp).frames, len(bg)); bg = bg[:n]
+        sw = song_weight(getattr(a, 'song_spans', None) or [], t0, min(sf.info(vp).frames, len(bg)))
+        if jp_off and sw is None: voc = None; n = min(sf.info(vp).frames, len(bg)); bg = bg[:n]
         else:
             voc, _ = sf.read(vp, dtype='float32')
             n = min(len(voc), len(bg)); voc, bg = voc[:n], bg[:n]
@@ -56,13 +74,16 @@ def run_mix(a, chunks, place, wd):
             if i1 <= i0: continue
             eng[i0:i1] += x[a0:a0 + i1 - i0] * db(a.tts_db); mask[i0:i1] = 1
         c0 = int(ctx * SR)
-        if jp_off:
+        if jp_off and sw is None:
             mix = bg + eng[c0:c0 + n, None]
         else:
-            # duck envelope: pre-roll (attack) and smoothing (release) around English speech
-            att, rel = int(a.duck_hold * SR), int(a.duck_smooth * SR)
-            env = _smooth(np.pad(mask, (att, 0))[:N], rel)
-            jp_gain = db(a.jp_db) * db(a.duck_db * env[c0:c0 + n])
+            if jp_off: jp_gain = np.zeros(n, np.float32)
+            else:
+                # duck envelope: pre-roll (attack) and smoothing (release) around English speech
+                att, rel = int(a.duck_hold * SR), int(a.duck_smooth * SR)
+                env = _smooth(np.pad(mask, (att, 0))[:N], rel)
+                jp_gain = db(a.jp_db) * db(a.duck_db * env[c0:c0 + n])
+            if sw is not None: sw = sw[:n]; jp_gain = sw + (1 - sw) * jp_gain    # songs: vocals at 0 dB, no ducking
             mix = bg + voc * jp_gain[:, None] + eng[c0:c0 + n, None]
         peak = float(np.abs(mix).max()) if n else 0.0
         sf.write(out + '.tmp.wav', mix, SR, subtype='FLOAT'); os.replace(out + '.tmp.wav', out)

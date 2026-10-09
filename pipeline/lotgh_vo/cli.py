@@ -6,6 +6,16 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STAGES = ['ocr', 'separate', 'tts', 'mix', 'mux']          # (+ 'clone' before tts with --clone)
 
 
+SONG_CLASSES = ('white',)        # OP/ED lyric subtitles
+def song_spans(subs, dur, gap=6.0, pad=1.0):
+    """Time spans of songs from lyric subtitles: merged when < gap apart, padded on both sides."""
+    out = []
+    for s, e, text, cls in sorted(subs, key=lambda x: x[0]):
+        if cls not in SONG_CLASSES: continue
+        if out and s - out[-1][1] < gap: out[-1][1] = max(out[-1][1], e)
+        else: out.append([s, e])
+    return [[round(max(0.0, x - pad), 3), round(min(dur, y + pad), 3)] for x, y in out]
+
 def _jp_level(v):
     return None if str(v).strip().lower() in ('off', 'none', '') else float(v)
 
@@ -50,6 +60,9 @@ def parse_args(argv=None):
                         "and nothing is ducked. The original Japanese audio is always kept as the second audio track.")
     g.add_argument('--duck-db', type=float, default=-9, help='extra Japanese attenuation while English plays')
     g.add_argument('--tts-db', type=float, default=0, help='English voice level')
+    g.add_argument('--keep-song-vocals', action=argparse.BooleanOptionalAction, default=True,
+                   help='keep the vocals stem at full level (no ducking) during songs, i.e. around white lyric subtitles '
+                        '(merged when < 6 s apart, padded 1 s with short fades), whatever --jp-db is')
     g.add_argument('--duck-hold', type=float, default=0.15); g.add_argument('--duck-smooth', type=float, default=0.3)
     g = ap.add_argument_group('performance')
     g.add_argument('--jobs', type=int, default=max(1, cores), help='OCR worker processes')
@@ -159,6 +172,9 @@ def main(argv=None):
     if a.srt and a.corrections:
         from .textfix import load_corrections, apply_corrections
         rules = load_corrections(a.corrections); subs = [[s, e, apply_corrections(x, rules, 'dialogue'), c] for s, e, x, c in subs]
+    a.song_spans = song_spans(subs, info['duration']) if a.keep_song_vocals else []
+    if a.song_spans:
+        log('voices', 'song vocals kept in ' + ', '.join(f'{x:.1f}-{y:.1f}s' for x, y in a.song_spans))
     vm = voice_map(a)
     lines, skipped, classes = [], {}, []
     for s, e, text, cls in subs:

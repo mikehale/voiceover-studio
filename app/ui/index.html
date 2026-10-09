@@ -99,6 +99,8 @@ label.chk{display:flex;gap:6px;align-items:center}pre{white-space:pre-wrap;font:
   <div>Japanese voices level</div><div class="row"><input type="range" id="s_jp_db" min="-41" max="0" step="1" class="grow"><span id="v_jp_db" class="val"></span></div>
   <div></div><div class="sub wrap">All the way left = Off (default): the Japanese voices are left out of the English track, so you hear the music, effects and English only. The original Japanese audio is always kept as the second audio track.</div>
   <div>Extra ducking under English</div><div class="row"><input type="range" id="s_duck_db" min="-30" max="0" step="1" class="grow"><span id="v_duck_db" class="val"></span></div>
+  <div>Songs</div><label><input type="checkbox" id="s_keep_song_vocals">Keep song vocals</label>
+  <div></div><div class="sub wrap">Keeps the singing in the opening/ending songs at full level, found from the white lyric subtitles. Songs without lyric subtitles follow the Japanese voices level.</div>
   <div>English voice level</div><div class="row"><input type="range" id="s_tts_db" min="-12" max="6" step="1" class="grow"><span id="v_tts_db" class="val"></span></div>
  </div></section>
  <section id="t-dl" class="pane"><div class="grid">
@@ -195,7 +197,7 @@ async function refresh(){try{const s=await api('/api/state');S=s;DATA=s.data_dir
  document.getElementById('list').innerHTML=n?s.items.map((it,i)=>itemHTML(it,i,n)).join(''):'<div class="empty">Queue is empty. Paste URLs above or add local videos.</div>'}catch(e){}}
 function fillVoices(id,extra){const el=document.getElementById(id);el.innerHTML=(extra||'')+VOICES.map(v=>`<option value="${v[0]}">${v[1]}</option>`).join('')}
 fillVoices('s_voice_dialogue');fillVoices('s_voice_narrator');fillVoices('s_voice_lyrics','<option value="skip">Don\'t voice (recommended)</option>');
-const FIELDS=['output_dir','voice_dialogue','voice_narrator','voice_lyrics','jp_db','duck_db','tts_db','video_codec','max_height','cookies','keep_source','clone_default','clone_accent'];
+const FIELDS=['output_dir','voice_dialogue','voice_narrator','voice_lyrics','jp_db','duck_db','tts_db','video_codec','max_height','cookies','keep_source','clone_default','clone_accent','keep_song_vocals'];
 function openSettings(){const s=S.settings;mainBefore={clone:document.getElementById('addClone').checked,accent:document.getElementById('addAccent').value};for(const f of FIELDS){const el=document.getElementById('s_'+f);if(el.type==='checkbox')el.checked=!!s[f];else el.value=s[f]}
  for(const f of['jp_db','duck_db','tts_db'])upd(f);document.getElementById('ver').textContent='Version '+S.version;show('settings')}
 function upd(f){const v=document.getElementById('s_'+f).value;document.getElementById('v_'+f).textContent=(f==='jp_db'&&Number(v)<=-41)?'Off':v+' dB';

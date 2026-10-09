@@ -9,7 +9,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 APP_NAME = 'Voiceover Studio'
-VERSION = '0.3.0'
+VERSION = '0.3.1'
 KOKORO_FILES = [
     ('kokoro-v1.0.fp16.onnx', 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx', 177464787),
     ('voices-v1.0.bin', 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin', 28214398),
@@ -82,7 +82,7 @@ def load(path, default):
 
 def default_settings():
     return dict(output_dir=os.path.expanduser('~/Movies/Voiceover'), voice_dialogue='bm_daniel', voice_narrator='bm_lewis',
-                voice_lyrics='skip', jp_db=JP_OFF, duck_db=-9, tts_db=0, keep_source=False, video_codec='h264',
+                voice_lyrics='skip', jp_db=JP_OFF, duck_db=-9, tts_db=0, keep_song_vocals=True, keep_source=False, video_codec='h264',
                 cookies='none', max_height=720, clone_default=False, clone_optin=False, clone_accent='original')
 
 def save_queue():
@@ -634,6 +634,7 @@ def voiceover(it, src, base_pct):
     cmd = [P.py, '-m', 'lotgh_vo', src, '-o', out, '--workdir', wd,
            '--voices', os.path.join(P.data, 'voices.json'), '--corrections', os.path.join(P.data, 'corrections.json'),
            '--models', P.models, '--jp-db', jp_arg(s.get('jp_db')), '--duck-db', str(s['duck_db']), '--tts-db', str(s.get('tts_db', 0)),
+           '--keep-song-vocals' if s.get('keep_song_vocals', True) else '--no-keep-song-vocals',
            '--video-codec', s.get('video_codec', 'h264')]
     if s.get('voice_lyrics', 'skip') != 'skip': cmd += ['--no-skip-white']
     use_clone = bool(it.get('clone'))
@@ -824,6 +825,7 @@ def handle_post(path, b):
         with LOCK:
             for k, v in b.items():
                 if k in default_settings() and k != 'clone_optin': STATE['settings'][k] = v
+            STATE['settings']['keep_song_vocals'] = bool(STATE['settings'].get('keep_song_vocals', True))
             if STATE['settings'].get('clone_accent') not in ACCENTS: STATE['settings']['clone_accent'] = 'original'
             if not clone_ready(): STATE['settings']['clone_default'] = False; STATE['settings']['clone_accent'] = 'original'
         if STATE['settings']['clone_accent'] != 'original': start_de_install()     # first time German is chosen
