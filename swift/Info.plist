@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+ <key>CFBundleName</key><string>Voiceover Studio</string>
+ <key>CFBundleDisplayName</key><string>Voiceover Studio</string>
+ <key>CFBundleIdentifier</key><string>com.lotgh.voiceoverstudio</string>
+ <key>CFBundleExecutable</key><string>VoiceoverStudio</string>
+ <key>CFBundleIconFile</key><string>AppIcon</string>
+ <key>CFBundlePackageType</key><string>APPL</string>
+ <key>CFBundleShortVersionString</key><string>1.0.0</string>
+ <key>CFBundleVersion</key><string>1</string>
+ <key>LSMinimumSystemVersion</key><string>12.0</string>
+ <key>LSArchitecturePriority</key><array><string>arm64</string></array>
+ <key>LSRequiresNativeExecution</key><true/>
+ <key>NSHighResolutionCapable</key><true/>
+ <key>NSHumanReadableCopyright</key><string>Personal build. Uses Kokoro, Demucs, RapidOCR, yt-dlp and FFmpeg.</string>
+ <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict></plist>

@@ -1,0 +1,12 @@
+{
+  "_help": "Subtitle colour class -> Kokoro voice. Classes come from the OCR'd text colour: yellow (dialogue), cyan (narrator), white (OP/ED song lyrics), red, green, other. Use \"skip\" to not voice a class. Language is inferred from the voice prefix (a*=en-us, b*=en-gb). Voices: af_heart af_bella af_nicole af_sarah am_michael am_fenrir am_puck am_onyx bf_emma bf_isabella bm_george bm_fable bm_lewis bm_daniel ... Override on the command line with --voice cyan=bm_lewis.",
+  "classes": {
+    "yellow": "bm_daniel",
+    "cyan": "bm_lewis",
+    "white": "skip",
+    "red": "bm_daniel",
+    "green": "bm_daniel",
+    "other": "bm_daniel"
+  },
+  "speeds": {}
+}

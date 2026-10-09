@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Voiceover Studio</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#f5f5f7;--card:#fff;--fg:#1d1d1f;--mut:#6e6e73;--line:#e3e3e8;--acc:#5b5bf0;--acc2:#8a4ff0;--ok:#1f9d55;--warn:#c27c0e;--err:#d93025}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1e;--card:#2c2c2e;--fg:#f2f2f7;--mut:#a1a1a6;--line:#3a3a3c}}
+*{box-sizing:border-box}body{margin:0;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",Helvetica,sans-serif;background:var(--bg);color:var(--fg);-webkit-user-select:none}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}
+header h1{font-size:16px;margin:0;font-weight:650;flex:1;display:flex;align-items:center;gap:9px}
+.logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:13px}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:7px;padding:5px 11px;cursor:pointer}
+button:hover{border-color:var(--acc)}button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}button.sm{padding:2px 7px;font-size:12px}
+button:disabled{opacity:.45;cursor:default}
+main{padding:18px 20px;max-width:1000px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:14px 16px;margin-bottom:14px}
+textarea,input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 8px;-webkit-user-select:text}
+textarea{width:100%;height:70px;resize:vertical}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1}.mut{color:var(--mut)}
+.item{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:11px 2px;border-top:1px solid var(--line)}
+.item:first-child{border-top:none}.title{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:5px}.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .4s}
+.badge{font-size:11px;padding:1px 7px;border-radius:9px;font-weight:600;margin-right:6px;background:var(--line)}
+.b-done{background:#d7f5e3;color:var(--ok)}.b-error{background:#fde2e0;color:var(--err)}.b-no_hardsubs{background:#fdf0d5;color:var(--warn)}
+.b-processing,.b-downloading{background:#e5e5ff;color:var(--acc)}
+@media (prefers-color-scheme:dark){.b-done{background:#173d27}.b-error{background:#4a1f1c}.b-no_hardsubs{background:#4a3a14}.b-processing,.b-downloading{background:#2b2b5c;color:#b3b3ff}}
+.acts{display:flex;gap:4px;align-items:start}
+.empty{text-align:center;color:var(--mut);padding:26px}
+#setup{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;align-items:center;justify-content:center}
+#setup .box{width:560px}.step{display:grid;grid-template-columns:22px 1fr;gap:2px 8px;margin:9px 0}
+.ico{font-size:14px;text-align:center}.spin{display:inline-block;animation:sp 1s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:30}
+.modal .card{width:620px;max-height:calc(100vh - 32px);overflow:auto}.grid{display:grid;grid-template-columns:190px minmax(0,1fr);gap:10px 12px;align-items:center}
+label.chk{display:flex;gap:6px;align-items:center}pre{white-space:pre-wrap;font:11px/1.4 ui-monospace,Menlo,monospace;max-height:60vh;overflow:auto;-webkit-user-select:text}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:7px 14px;border-radius:8px;display:none;z-index:40}
+.modal{padding:16px}
+.modal .sheet{width:min(680px,100%);max-height:calc(100vh - 32px);display:flex;flex-direction:column;padding:0;margin:0;overflow:hidden}
+.sheet-head{padding:14px 18px 0;border-bottom:1px solid var(--line)}.sheet-head h3{margin:0 0 10px}
+.tabs{display:flex;gap:2px}.tab{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 12px;color:var(--mut)}
+.tab.on{color:var(--fg);border-bottom-color:var(--acc);font-weight:600}.tab:hover{border-color:transparent;color:var(--fg)}.tab.on:hover{border-bottom-color:var(--acc)}
+.sheet-body{overflow-y:auto;padding:16px 18px;flex:1;min-height:0}
+.pane{display:none}.pane.on{display:block}
+.sheet-foot{padding:10px 18px;border-top:1px solid var(--line)}
+.grid select,.grid input:not([type=checkbox]):not([type=range]){min-width:0;max-width:100%}.wrap{white-space:normal}.val{min-width:46px;text-align:right}
+@media (max-width:620px){.grid{grid-template-columns:1fr}.grid>div:nth-child(odd){font-weight:600;margin-top:6px}}
+@media (max-height:520px){.sheet-head h3{display:none}}
+</style></head><body>
+<header><h1><span class="logo">&#9654;</span>Voiceover Studio</h1>
+<button id="pauseBtn"></button><button onclick="openSettings()">Settings</button></header>
+<main>
+ <div class="card">
+  <textarea id="urls" placeholder="Paste YouTube video or playlist URLs, one per line. Playlists are expanded into separate videos."></textarea>
+  <div class="row" style="margin-top:8px">
+   <button class="pri" onclick="addUrls()">Add to queue</button>
+   <button onclick="addFiles()">Add local videos…</button>
+   <span class="grow"></span>
+   <span class="mut">Only process</span><input id="rStart" placeholder="start (e.g. 4:20)" size="11"><span class="mut">to</span><input id="rEnd" placeholder="end (optional)" size="11">
+  </div>
+  <div class="sub" style="margin-top:6px">Videos need burned-in English subtitles. Yellow lines are voiced as dialogue and cyan lines as the narrator.</div>
+ </div>
+ <div class="card"><div class="row" style="margin-bottom:4px"><b class="grow">Queue</b><span class="mut" id="summary"></span><button class="sm" onclick="post('/api/clear_done')">Clear finished</button></div>
+  <div id="list"></div></div>
+</main>
+<div id="setup"><div class="box card"><h2 style="margin-top:0">Setting up Voiceover Studio</h2>
+<div class="mut">First launch only: downloading the voice, OCR and audio models (about 1.4 GB). This takes a few minutes.</div>
+<div id="steps"></div><div id="setupErr" style="color:var(--err);margin-top:8px"></div>
+<div class="row" style="margin-top:10px"><button id="setupRetry" onclick="post('/api/setup/retry')" style="display:none">Retry</button><span class="grow"></span><button onclick="native('openPath',{path:DATA+'/logs/setup.log'})">Show log</button></div></div></div>
+<div class="modal" id="settings"><div class="card sheet">
+<div class="sheet-head"><h3>Settings</h3>
+ <div class="tabs" role="tablist"><button class="tab on" data-tab="t-out">Output</button><button class="tab" data-tab="t-voi">Voices</button><button class="tab" data-tab="t-mix">Mix</button><button class="tab" data-tab="t-dl">Download</button></div></div>
+<div class="sheet-body">
+ <section id="t-out" class="pane on"><div class="grid">
+  <div>Output folder</div><div class="row"><input id="s_output_dir" class="grow"><button onclick="pickFolder()">Choose…</button></div>
+  <div>Output video</div><select id="s_video_codec"><option value="h264">H.264 (plays everywhere, re-encodes)</option><option value="copy">Copy original video (faster; AV1 needs IINA/VLC or an M3+ Mac)</option></select>
+  <div>Downloaded source</div><label class="chk"><input type="checkbox" id="s_keep_source">Keep it (moved to <i>Sources/</i> in the output folder)</label>
+ </div></section>
+ <section id="t-voi" class="pane"><div class="grid">
+  <div>Dialogue voice (yellow)</div><select id="s_voice_dialogue"></select>
+  <div>Narrator voice (cyan)</div><select id="s_voice_narrator"></select>
+  <div>Song lyrics (white)</div><select id="s_voice_lyrics"></select>
+  <div>Subtitle corrections</div><div class="row"><button onclick="native('openPath',{path:DATA+'/corrections.json',text:true})">Edit corrections…</button><span class="sub">find/replace rules applied after OCR</span></div>
+ </div></section>
+ <section id="t-mix" class="pane"><div class="grid">
+  <div>Japanese voices level</div><div class="row"><input type="range" id="s_jp_db" min="-40" max="0" step="1" class="grow"><span id="v_jp_db" class="val"></span></div>
+  <div>Extra ducking under English</div><div class="row"><input type="range" id="s_duck_db" min="-30" max="0" step="1" class="grow"><span id="v_duck_db" class="val"></span></div>
+  <div>English voice level</div><div class="row"><input type="range" id="s_tts_db" min="-12" max="6" step="1" class="grow"><span id="v_tts_db" class="val"></span></div>
+ </div></section>
+ <section id="t-dl" class="pane"><div class="grid">
+  <div>Download quality</div><select id="s_max_height"><option value="480">up to 480p</option><option value="720">up to 720p</option><option value="1080">up to 1080p</option></select>
+  <div>Browser cookies</div><select id="s_cookies"><option value="none">None</option><option value="chrome">Chrome</option><option value="safari">Safari</option><option value="firefox">Firefox</option><option value="edge">Edge</option><option value="brave">Brave</option></select>
+  <div></div><div class="sub wrap">Use cookies only for age- or region-restricted videos. Chrome asks for Keychain access once. Safari needs Full Disk Access for Voiceover Studio.</div>
+  <div>Maintenance</div><div class="row"><button onclick="post('/api/update_ytdlp').then(()=>toast('Updating yt-dlp in the background'))">Update yt-dlp</button><button onclick="native('openPath',{path:DATA+'/logs'})">Open logs</button></div>
+ </div></section>
+</div>
+<div class="sheet-foot row"><span class="mut grow" id="ver"></span><button onclick="closeSettings()">Cancel</button><button class="pri" onclick="saveSettings()">Save</button></div></div></div>
+<div class="modal" id="logm"><div class="card"><div class="row"><b class="grow" id="logt">Log</b><button onclick="hide('logm')">Close</button></div><pre id="logp"></pre></div></div>
+<div class="toast" id="toast"></div>
+<script>
+const TOKEN=new URLSearchParams(location.search).get('t')||'';let S=null,DATA='';
+const VOICES=[['bm_daniel','Daniel (British male)'],['bm_lewis','Lewis (British male, deep)'],['bm_george','George (British male)'],['bm_fable','Fable (British male)'],
+['am_michael','Michael (US male)'],['am_fenrir','Fenrir (US male)'],['am_puck','Puck (US male)'],['am_onyx','Onyx (US male, deep)'],['am_adam','Adam (US male)'],['am_echo','Echo (US male)'],['am_eric','Eric (US male)'],['am_liam','Liam (US male)'],
+['bf_emma','Emma (British female)'],['bf_isabella','Isabella (British female)'],['bf_alice','Alice (British female)'],['bf_lily','Lily (British female)'],
+['af_heart','Heart (US female)'],['af_bella','Bella (US female)'],['af_nicole','Nicole (US female)'],['af_sarah','Sarah (US female)'],['af_kore','Kore (US female)'],['af_aoede','Aoede (US female)'],['af_nova','Nova (US female)'],['af_sky','Sky (US female)']];
+const STATUS={queued:'Queued',expanding:'Reading info',downloading:'Downloading',processing:'Processing',done:'Done',error:'Error',no_hardsubs:'No hardsubs found',stopped:'Stopped'};
+async function api(p,o={}){o.headers=Object.assign({'X-Token':TOKEN,'Content-Type':'application/json'},o.headers||{});const r=await fetch(p,o);return r.json()}
+function post(p,b={}){return api(p,{method:'POST',body:JSON.stringify(b)}).then(r=>{if(r.error)toast(r.error);refresh();return r})}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',3500)}
+function show(id){document.getElementById(id).style.display='flex'}function hide(id){document.getElementById(id).style.display='none'}
+let nseq=0;const pend={};
+function native(cmd,args={}){return new Promise(res=>{const id=++nseq;pend[id]=res;
+ if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.native){window.webkit.messageHandlers.native.postMessage(Object.assign({cmd,id},args))}
+ else{ if(cmd==='pickFiles'){const p=prompt('Video file paths (one per line)');res(p?p.split('\n').filter(Boolean):[])} else if(cmd==='pickFolder'){res(prompt('Folder path'))} else res(null)}})}
+window.__nativeReply=(id,val)=>{if(pend[id]){pend[id](val);delete pend[id]}};
+function range(){return{start:document.getElementById('rStart').value.trim(),end:document.getElementById('rEnd').value.trim()}}
+async function addUrls(){const t=document.getElementById('urls').value;if(!t.trim())return;const r=await post('/api/add',Object.assign({text:t},range()));if(r.added){document.getElementById('urls').value='';toast(`Added ${r.added} item(s)`)}else toast('No URLs or files found')}
+async function addFiles(){const paths=await native('pickFiles');if(paths&&paths.length)post('/api/add_files',Object.assign({paths},range()))}
+async function pickFolder(){const p=await native('pickFolder');if(p)document.getElementById('s_output_dir').value=p}
+function itemHTML(it,i,n){
+ const run=it.status==='downloading'||it.status==='processing';const pct=it.status==='done'?100:(it.pct||0);
+ const src=it.kind==='url'?it.url:it.path;const rng=(it.start||it.end)?` · ${esc(it.start||'0')}–${esc(it.end||'end')}`:'';
+ let acts='';
+ if(run)acts+=`<button class="sm" onclick="post('/api/item/${it.id}/stop')">Stop</button>`;
+ if(['error','stopped','no_hardsubs','done'].includes(it.status))acts+=`<button class="sm" onclick="post('/api/item/${it.id}/retry')">${it.status==='done'?'Redo':'Retry'}</button>`;
+ if(it.status==='done'&&it.output)acts+=`<button class="sm" onclick="native('openPath',{path:'${esc(it.output).replace(/'/g,"\\'")}'})">Play</button><button class="sm" onclick="native('reveal',{path:'${esc(it.output).replace(/'/g,"\\'")}'})">Show</button>`;
+ acts+=`<button class="sm" title="Move up" ${i==0?'disabled':''} onclick="post('/api/item/${it.id}/up')">↑</button><button class="sm" title="Move down" ${i==n-1?'disabled':''} onclick="post('/api/item/${it.id}/down')">↓</button>`;
+ acts+=`<button class="sm" title="Log" onclick="showLog('${it.id}')">≡</button><button class="sm" title="Remove" onclick="post('/api/item/${it.id}/remove')">✕</button>`;
+ return `<div class="item"><div style="min-width:0"><div class="title">${esc(it.title||src)}</div>
+ <div class="sub"><span class="badge b-${it.status}">${STATUS[it.status]||it.status}</span>${esc(it.message||'')}</div>
+ <div class="sub">${esc(src)}${rng}${it.playlist?' · '+esc(it.playlist):''}</div>
+ ${(run||it.status==='done')?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}</div><div class="acts">${acts}</div></div>`}
+async function showLog(id){const r=await api('/api/log/'+id);document.getElementById('logt').textContent='Log';document.getElementById('logp').textContent=r.log||'(empty)';show('logm');const p=document.getElementById('logp');p.scrollTop=p.scrollHeight}
+function renderSetup(st){
+ const ready=st.state==='ready';document.getElementById('setup').style.display=ready?'none':'flex';if(ready||!st.steps)return;
+ document.getElementById('steps').innerHTML=st.order.map(k=>{const s=st.steps[k];const ico={done:'✅',error:'❌',pending:'○',running:'<span class="spin">◐</span>'}[s.state];
+ return `<div class="step"><div class="ico">${ico}</div><div><div>${esc(s.label)}</div>${s.state==='running'?`<div class="bar"><i style="width:${s.pct==null?100:s.pct}%;${s.pct==null?'opacity:.35':''}"></i></div><div class="sub">${esc(s.detail||'')}</div>`:''}</div></div>`}).join('');
+ document.getElementById('setupErr').textContent=st.error||'';document.getElementById('setupRetry').style.display=st.state==='error'?'':'none'}
+let lastJSON='';
+async function refresh(){try{const s=await api('/api/state');S=s;DATA=s.data_dir;renderSetup(s.setup||{});
+ const j=JSON.stringify([s.items,s.paused]);if(j===lastJSON)return;lastJSON=j;
+ document.getElementById('pauseBtn').textContent=s.paused?'▶ Resume queue':'⏸ Pause queue';
+ document.getElementById('pauseBtn').onclick=()=>post('/api/pause',{paused:!s.paused});
+ const n=s.items.length,done=s.items.filter(i=>i.status==='done').length;document.getElementById('summary').textContent=n?`${done}/${n} done${s.paused?' · paused':''}`:'';
+ document.getElementById('list').innerHTML=n?s.items.map((it,i)=>itemHTML(it,i,n)).join(''):'<div class="empty">Queue is empty. Paste URLs above or add local videos.</div>'}catch(e){}}
+function fillVoices(id,extra){const el=document.getElementById(id);el.innerHTML=(extra||'')+VOICES.map(v=>`<option value="${v[0]}">${v[1]}</option>`).join('')}
+fillVoices('s_voice_dialogue');fillVoices('s_voice_narrator');fillVoices('s_voice_lyrics','<option value="skip">Don\'t voice (recommended)</option>');
+const FIELDS=['output_dir','voice_dialogue','voice_narrator','voice_lyrics','jp_db','duck_db','tts_db','video_codec','max_height','cookies','keep_source'];
+function openSettings(){const s=S.settings;for(const f of FIELDS){const el=document.getElementById('s_'+f);if(el.type==='checkbox')el.checked=!!s[f];else el.value=s[f]}
+ for(const f of['jp_db','duck_db','tts_db'])upd(f);document.getElementById('ver').textContent='Version '+S.version;show('settings')}
+function upd(f){document.getElementById('v_'+f).textContent=document.getElementById('s_'+f).value+' dB'}
+for(const f of['jp_db','duck_db','tts_db'])document.getElementById('s_'+f).oninput=()=>upd(f);
+function closeSettings(){hide('settings')}
+async function saveSettings(){const b={};for(const f of FIELDS){const el=document.getElementById('s_'+f);b[f]=el.type==='checkbox'?el.checked:(el.type==='range'||f==='max_height'?Number(el.value):el.value)}
+ await post('/api/settings',b);hide('settings');toast('Settings saved (applies to items that start after this)')}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id===t.dataset.tab))});
+refresh();setInterval(refresh,1000);
+</script></body></html>

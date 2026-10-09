@@ -1,0 +1,28 @@
+# build outputs and downloaded tools
+cache/
+dist/
+*.app/
+*.dmg
+*.zip
+*.iconset/
+*.icns
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# models and media (downloaded at first run)
+models/
+*.onnx
+*.bin
+*.pt
+*.th
+*.safetensors
+*.webm
+*.mkv
+*.mp4
+*.wav
+*.flac
+# misc
+.DS_Store
+*.log

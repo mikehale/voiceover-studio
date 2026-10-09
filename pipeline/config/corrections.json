@@ -1,0 +1,7 @@
+{
+  "_help": "Applied to OCR output before voicing (re-running is cheap: OCR is cached, only the assembly is redone). find = plain text unless \"regex\": true. applies_to = all | dialogue | captions. Optional \"case_sensitive\": false.",
+  "replacements": [
+    {"find": "Inward, there", "replace": "In war, there"},
+    {"find": "\\bPhezzan\\b", "replace": "Phezzan", "regex": true, "_note": "example of a regex rule (no-op)"}
+  ]
+}
