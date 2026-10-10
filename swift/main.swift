@@ -171,6 +171,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
     func webView(_ w: WKWebView, runJavaScriptAlertPanelWithMessage m: String, initiatedByFrame f: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = NSAlert(); a.messageText = m; a.runModal(); completionHandler()
     }
+    // window.confirm(): without this WKWebView answers "Cancel" to every confirm(), so buttons behind one did nothing
+    func webView(_ w: WKWebView, runJavaScriptConfirmPanelWithMessage m: String, initiatedByFrame f: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let a = NSAlert(); a.messageText = m; a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        completionHandler(a.runModal() == .alertFirstButtonReturn)
+    }
 
     func reply(_ id: Any?, _ val: Any?) {
         let json: String
@@ -189,6 +194,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
             p.allowedContentTypes = [.movie, .video, .mpeg4Movie, .quickTimeMovie] + ["mkv", "webm"].compactMap { UTType(filenameExtension: $0) }
             p.message = "Choose videos with burned-in English subtitles"
             p.beginSheetModal(for: window) { r in self.reply(id, r == .OK ? p.urls.map { $0.path } : []) }
+        case "pickPlugin":
+            let p = NSOpenPanel(); p.allowsMultipleSelection = false; p.canChooseDirectories = false
+            p.allowedContentTypes = [.zip]
+            p.message = "Choose a voice plugin (.zip)"
+            p.beginSheetModal(for: window) { r in self.reply(id, r == .OK ? p.urls.first?.path : nil) }
         case "pickFolder":
             let p = NSOpenPanel(); p.canChooseFiles = false; p.canChooseDirectories = true; p.canCreateDirectories = true
             p.prompt = "Choose"

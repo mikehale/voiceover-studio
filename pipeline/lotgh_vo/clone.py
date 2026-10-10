@@ -4,7 +4,7 @@ Runs lotgh_vo.clone_worker in the separate Chatterbox venv (--clone-python): spe
 vocals stem by voice fingerprint, each gets a 6-10 s reference clip (the narrator gets its own from cyan lines), and
 every line is generated in its speaker's voice. Here each line is then fitted to its subtitle slot exactly like
 Kokoro lines (trim, speed-up <= max_tempo, no overlap). Lines that fail fall back to Kokoro (run_tts).
-With --clone-accent german the worker reads the English text with Chatterbox Multilingual (language 'de');
+With --clone-accent german_v3 the worker reads the English text with Chatterbox Multilingual V3 (language 'de');
 fallback order per line: German clone -> original-accent clone -> Kokoro, each logged."""
 import json, os, subprocess, sys
 import numpy as np, soundfile as sf
@@ -39,9 +39,12 @@ def run_clone(a, lines, classes, chunks, dur, wd):
                        role='narrator' if classes[i] in NARRATOR_CLASSES else 'dialogue'))
     if not jl: return {}
     job = dict(version=CLONE_VERSION, seed=CLONE_SEED, exaggeration=EXAGGERATION, cfg=CFG, device=a.clone_device,
-               dir=cdir, lines=jl, chunks=[list(c) for c in chunks], accent=getattr(a, 'clone_accent', 'original'))
+               dir=cdir, lines=jl, chunks=[list(c) for c in chunks], accent=getattr(a, 'clone_accent', 'original'),
+               custom=getattr(a, 'clone_custom', None) or {})
     jp = os.path.join(cdir, 'job.json'); atomic_json(jp, job)
     acc = job['accent'] if job['accent'] != 'original' else ''
+    for role, v in job['custom'].items():
+        log('clone', f"custom {role} voice: {v['name']} ({v['accent']} accent, {v['path']})")
     log('clone', f"cloned voices (Chatterbox{', ' + acc + ' accent' if acc else ''}) for {len(jl)} lines; "
                  + (f'the original-accent clone, then Kokoro, is used for any line that fails' if acc else 'Kokoro is used for any line that fails'))
     env = dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK='1', HF_HUB_OFFLINE='1', TOKENIZERS_PARALLELISM='false', TQDM_DISABLE='1')
@@ -82,7 +85,8 @@ def run_clone(a, lines, classes, chunks, dur, wd):
         f = os.path.join(fdir, f'{key}.wav')
         try:
             meta = _fit(r['path'], L['slot'], a.max_tempo, f) if not os.path.exists(f) else {}
-            out[L['i']] = dict(out=f, meta=dict(meta, clone=r['spk'], ref=r['ref'], accent=r.get('accent', 'original')))
+            out[L['i']] = dict(out=f, meta=dict(meta, clone=r['spk'], ref=r['ref'], accent=r.get('accent', 'original'),
+                                                **({'custom': r['custom']} if r.get('custom') else {})))
         except Exception as e:
             failed.append((L['i'], f'fit failed: {e}'))
     for i, why in failed:
@@ -92,7 +96,10 @@ def run_clone(a, lines, classes, chunks, dur, wd):
                 speakers=info.get('speakers'), lines=info.get('lines'), fallback=[i for i, _ in failed],
                 accent=job['accent'], accent_lines=sorted(i for i, v in out.items() if v['meta']['accent'] != 'original'),
                 accent_fallback=sorted(int(i) for i, r in res['results'].items() if r.get('accent_fallback'))))
-    if acc:
+    nc = sum(1 for v in out.values() if v['meta'].get('custom'))
+    if job['custom']: log('clone', f'{nc} lines in custom voices')
+    if acc or any(v['accent'] != 'original' for v in job['custom'].values()):
+        acc = acc or '/'.join(sorted({v['accent'] for v in job['custom'].values() if v['accent'] != 'original'}))
         n_acc = sum(1 for v in out.values() if v['meta']['accent'] != 'original')
         log('clone', f'{n_acc} lines with {acc} accent, {len(out) - n_acc} with the original accent')
     log('clone', f"{len(out)} lines cloned, {len(failed)} on Kokoro; Chatterbox on {str(res.get('device')).upper()}, "

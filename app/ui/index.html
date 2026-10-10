@@ -62,7 +62,8 @@ label.chk{display:flex;gap:6px;align-items:center}pre{white-space:pre-wrap;font:
    <button class="pri" onclick="addUrls()">Add to queue</button>
    <button onclick="addFiles()">Add local videos…</button>
    <label class="chk" id="addCloneL" title="Install cloned voices in Settings > Voices to use this"><input type="checkbox" id="addClone" onchange="accentUI()">Use cloned voices</label>
-   <select id="addAccent" title="Accent of the cloned voices" onchange="accentPicked()"><option value="original">Original accent</option><option value="german">German accent</option></select>
+   <select id="addAccent" title="Accent of the cloned voices" onchange="accentPicked()"><option value="original">Original accent</option><option value="german_v3">German accent</option></select>
+   <select id="addVoice" title="Custom cloned voice for this video (Settings > Voices sets the default)" onchange="voicePicked()" style="display:none"></select>
    <span class="grow"></span>
    <span class="mut">Only process</span><input id="rStart" placeholder="start (e.g. 4:20)" size="11"><span class="mut">to</span><input id="rEnd" placeholder="end (optional)" size="11">
   </div>
@@ -91,8 +92,12 @@ label.chk{display:flex;gap:6px;align-items:center}pre{white-space:pre-wrap;font:
   <div>Song lyrics (white)</div><select id="s_voice_lyrics"></select>
   <div>Cloned voices</div><div id="cloneBox"></div>
   <div></div><label class="chk" id="cloneDefL"><input type="checkbox" id="s_clone_default" onchange="liveCloneDefaults()">Use cloned voices for new videos by default</label>
-  <div style="align-self:start;padding-top:7px">Accent of cloned voices</div><div><div class="row"><select id="s_clone_accent" onchange="liveCloneDefaults()"><option value="original">Original (as the actors sound)</option><option value="german">German</option></select><span class="sub">default for new videos; only applies with cloned voices</span></div><div id="deBox"></div></div>
-  <div></div><div class="sub wrap">Cloned voices speak the English lines in the voices of the original actors (Chatterbox, runs locally). Speakers are grouped automatically from the Japanese audio; the narrator gets its own voice. Much slower than the standard voices. Any line that can't be cloned uses the standard voice above. The German accent reads the English lines with a German accent (Chatterbox Multilingual, about 20% slower, somewhat less clear); lines it can't do use the original-accent clone.</div>
+  <div style="align-self:start;padding-top:7px">Accent of cloned voices</div><div><div class="row"><select id="s_clone_accent" onchange="liveCloneDefaults()"><option value="original">Original (as the actors sound)</option><option value="german_v3">German</option></select><span class="sub">default for new videos; only applies with cloned voices</span></div><div id="deBox"></div></div>
+  <div>Cloned narrator voice</div><select id="s_clone_voice_narrator" onchange="liveCloneDefaults()"></select>
+  <div>Cloned dialogue voice</div><select id="s_clone_voice_dialogue" onchange="liveCloneDefaults()"></select>
+  <div style="align-self:start;padding-top:5px">Voice plugins</div><div><div id="pluginBox"></div><div class="row" style="margin-top:4px"><button class="sm" onclick="installPlugin()">Install voice plugin…</button><span class="sub">.zip; adds a voice to the pickers above</span></div></div>
+  <div></div><div class="sub wrap">"From the video" clones the actors; a voice plugin speaks every narrator or dialogue line in its voice, with its own accent. Choosing one turns on cloned voices for new videos.</div>
+  <div></div><div class="sub wrap">Cloned voices speak the English lines in the voices of the original actors (Chatterbox, runs locally). Speakers are grouped automatically from the Japanese audio; the narrator gets its own voice. Much slower than the standard voices. Any line that can't be cloned uses the standard voice above. The German accent reads the English lines with a German accent (Chatterbox Multilingual V3, somewhat slower); lines it can't do use the original-accent clone.</div>
   <div>Subtitle corrections</div><div class="row"><button onclick="native('openPath',{path:DATA+'/corrections.json',text:true})">Edit corrections…</button><span class="sub">find/replace rules applied after OCR</span></div>
  </div></section>
  <section id="t-mix" class="pane"><div class="grid">
@@ -128,16 +133,34 @@ function show(id){document.getElementById(id).style.display='flex'}function hide
 let nseq=0;const pend={};
 function native(cmd,args={}){return new Promise(res=>{const id=++nseq;pend[id]=res;
  if(window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.native){window.webkit.messageHandlers.native.postMessage(Object.assign({cmd,id},args))}
- else{ if(cmd==='pickFiles'){const p=prompt('Video file paths (one per line)');res(p?p.split('\n').filter(Boolean):[])} else if(cmd==='pickFolder'){res(prompt('Folder path'))} else res(null)}})}
+ else{ if(cmd==='pickPlugin'){res(prompt('Voice plugin .zip path'))} else if(cmd==='pickFiles'){const p=prompt('Video file paths (one per line)');res(p?p.split('\n').filter(Boolean):[])} else if(cmd==='pickFolder'){res(prompt('Folder path'))} else res(null)}})}
 window.__nativeReply=(id,val)=>{if(pend[id]){pend[id](val);delete pend[id]}};
 function range(){return{start:document.getElementById('rStart').value.trim(),end:document.getElementById('rEnd').value.trim()}}
+function cvName(id){const v=((S&&S.custom_voices)||[]).find(x=>x.id===id);return v?v.name:id}
+function cvLabel(v){return v.name+(v.accent==='german_v3'?' (German accent)':'')}
+// per-run choice on the add row: value "narratorId|dialogueId" ('' = cloned from the video)
+function fillVoiceSelects(s){const cv=s.custom_voices||[];const key=JSON.stringify(cv);const av=document.getElementById('addVoice');
+ if(av._k!==key){av._k=key;
+  for(const r of['narrator','dialogue']){const el=document.getElementById('s_clone_voice_'+r),old=el.value;el.innerHTML='<option value="">From the video (automatic)</option>'+cv.map(v=>`<option value="${esc(v.id)}">${esc(cvLabel(v))}</option>`).join('');el.value=old||''}
+  let o='<option value="|">Voices: from the video</option>';for(const v of cv){o+=`<option value="${esc(v.id)}|">Narrator: ${esc(v.name)}</option><option value="|${esc(v.id)}">Dialogue: ${esc(v.name)}</option><option value="${esc(v.id)}|${esc(v.id)}">All lines: ${esc(v.name)}</option>`}
+  const old=av.value;av.innerHTML=o;if(old)setAddVoice(old)}
+ av.style.display=cv.length?'':'none'}
+async function installPlugin(){const p=await native('pickPlugin');if(!p)return;const r=await post('/api/plugins/install',{path:p});if(r&&r.id)toast('Voice plugin installed')}
+function renderPlugins(s){const cv=s.custom_voices||[],er=s.plugin_errors||[];
+ const h=(cv.length?cv.map(v=>`<div class="row"><span>${esc(cvLabel(v))} <span class="sub">v${esc(v.version)} · ${esc(v.author)}</span></span><button class="sm" onclick="if(confirm('Remove this voice plugin?'))post('/api/plugins/remove',{id:'${esc(v.id)}'})">Remove</button></div>`).join(''):'<div class="sub">No voice plugins installed</div>')
+  +er.map(e=>`<div class="sub wrap" style="color:var(--err)">${esc(e.id)}: ${esc(e.error)}</div>`).join('');
+ const b=document.getElementById('pluginBox');if(b._h!==h){b.innerHTML=h;b._h=h}}
+function setAddVoice(val){const av=document.getElementById('addVoice');if(![...av.options].some(o=>o.value===val)){const [n,d]=val.split('|');const op=document.createElement('option');op.value=val;op.textContent=`Narrator: ${n?cvName(n):'video'} · Dialogue: ${d?cvName(d):'video'}`;av.appendChild(op)}av.value=val}
+function addVoices(){if(!cloneOn())return{};const [n,d]=(document.getElementById('addVoice').value||'|').split('|');return{cvoice_narrator:n||'',cvoice_dialogue:d||''}}
+function voicePicked(){const c=document.getElementById('addClone');if(document.getElementById('addVoice').value!=='|'&&!c.disabled)c.checked=true;accentUI()}
 function cloneOn(){const c=document.getElementById('addClone');return !c.disabled&&c.checked}
 function addAccent(){return cloneOn()?document.getElementById('addAccent').value:'original'}
 // the accent picker stays usable once cloned voices are installed; choosing German turns on "Use cloned voices"
-function accentUI(){const a=document.getElementById('addAccent');a.disabled=document.getElementById('addClone').disabled;a.style.opacity=cloneOn()?1:.45}
-function accentPicked(){const c=document.getElementById('addClone');if(document.getElementById('addAccent').value==='german'&&!c.disabled)c.checked=true;accentUI()}
-async function addUrls(){const t=document.getElementById('urls').value;if(!t.trim())return;const r=await post('/api/add',Object.assign({text:t,clone:cloneOn(),accent:addAccent()},range()));if(r.added){document.getElementById('urls').value='';toast(`Added ${r.added} item(s)`)}else toast('No URLs or files found')}
-async function addFiles(){const paths=await native('pickFiles');if(paths&&paths.length)post('/api/add_files',Object.assign({paths,clone:cloneOn(),accent:addAccent()},range()))}
+function accentUI(){const a=document.getElementById('addAccent');a.disabled=document.getElementById('addClone').disabled;a.style.opacity=cloneOn()?1:.45;
+ const v=document.getElementById('addVoice');v.disabled=a.disabled;v.style.opacity=a.style.opacity}
+function accentPicked(){const c=document.getElementById('addClone');if(document.getElementById('addAccent').value==='german_v3'&&!c.disabled)c.checked=true;accentUI()}
+async function addUrls(){const t=document.getElementById('urls').value;if(!t.trim())return;const r=await post('/api/add',Object.assign({text:t,clone:cloneOn(),accent:addAccent()},addVoices(),range()));if(r.added){document.getElementById('urls').value='';toast(`Added ${r.added} item(s)`)}else toast('No URLs or files found')}
+async function addFiles(){const paths=await native('pickFiles');if(paths&&paths.length)post('/api/add_files',Object.assign({paths,clone:cloneOn(),accent:addAccent()},addVoices(),range()))}
 async function pickFolder(){const p=await native('pickFolder');if(p)document.getElementById('s_output_dir').value=p}
 function itemHTML(it,i,n){
  const run=it.status==='downloading'||it.status==='processing';const cready=S&&S.clone&&S.clone.state==='ready';const pct=it.status==='done'?100:(it.pct||0);
@@ -147,12 +170,12 @@ function itemHTML(it,i,n){
  if(['error','stopped','no_hardsubs','done'].includes(it.status))acts+=`<button class="sm" onclick="post('/api/item/${it.id}/retry')">${it.status==='done'?'Redo':'Retry'}</button>`;
  if(it.status==='done'&&it.output)acts+=`<button class="sm" onclick="native('openPath',{path:'${esc(it.output).replace(/'/g,"\\'")}'})">Play</button><button class="sm" onclick="native('reveal',{path:'${esc(it.output).replace(/'/g,"\\'")}'})">Show</button>`;
  if(!run&&it.status!=='done'&&(cready||it.clone))acts+=`<button class="sm" title="Use cloned voices for this video" onclick="post('/api/item/${it.id}/${it.clone?'clone_off':'clone_on'}')">${it.clone?'Use standard voices':'Use cloned voices'}</button>`;
- if(!run&&it.status!=='done'&&it.clone&&cready)acts+=`<button class="sm" title="Accent of the cloned voices for this video" onclick="post('/api/item/${it.id}/${it.accent==='german'?'accent_original':'accent_german'}')">${it.accent==='german'?'Original accent':'German accent'}</button>`;
+ if(!run&&it.status!=='done'&&it.clone&&cready)acts+=`<button class="sm" title="Accent of the cloned voices for this video" onclick="post('/api/item/${it.id}/${it.accent==='german_v3'?'accent_original':'accent_german_v3'}')">${it.accent==='german_v3'?'Original accent':'German accent'}</button>`;
  const ri=S.items.findIndex(x=>x.status==='downloading'||x.status==='processing');const topOff=run||it.status==='done'||i===(ri>=0&&ri<i?ri+1:0);
  acts+=`${acts?'<span class="sep"></span>':''}<button class="sm ico" title="Move to top" ${topOff?'disabled':''} onclick="post('/api/item/${it.id}/top')">⤒</button><button class="sm ico" title="Move up" ${i==0?'disabled':''} onclick="post('/api/item/${it.id}/up')">↑</button><button class="sm ico" title="Move down" ${i==n-1?'disabled':''} onclick="post('/api/item/${it.id}/down')">↓</button>`;
  acts+=`<button class="sm ico" title="Log" onclick="showLog('${it.id}')">≡</button><button class="sm ico" title="Remove" onclick="post('/api/item/${it.id}/remove')">✕</button>`;
  return `<div class="item st-${it.status}"><div class="item-info"><div class="title">${esc(it.title||src)}</div>
- <div class="sub"><span class="badge b-${it.status}">${STATUS[it.status]||it.status}</span>${it.clone?'<span class="badge b-clone">Cloned voices</span>':''}${it.clone&&it.accent==='german'?'<span class="badge b-accent">German accent</span>':''}${esc(it.message||'')}</div>
+ <div class="sub"><span class="badge b-${it.status}">${STATUS[it.status]||it.status}</span>${it.clone?'<span class="badge b-clone">Cloned voices</span>':''}${it.clone&&it.accent==='german_v3'?'<span class="badge b-accent">German accent</span>':''}${it.clone&&(it.cvoice_narrator||it.cvoice_dialogue)?`<span class="badge b-accent">${it.cvoice_narrator===it.cvoice_dialogue?'All: '+esc(cvName(it.cvoice_narrator)):[it.cvoice_narrator?'Narrator: '+esc(cvName(it.cvoice_narrator)):'',it.cvoice_dialogue?'Dialogue: '+esc(cvName(it.cvoice_dialogue)):''].filter(Boolean).join(' · ')}</span>`:''}${esc(it.message||'')}</div>
  <div class="sub">${esc(src)}${rng}${it.playlist?' · '+esc(it.playlist):''}</div>
  </div><div class="acts">${acts}</div>${(run||it.status==='done')?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}</div>`}
 async function showLog(id){const r=await api('/api/log/'+id);document.getElementById('logt').textContent='Log';document.getElementById('logp').textContent=r.log||'(empty)';show('logm');const p=document.getElementById('logp');p.scrollTop=p.scrollHeight}
@@ -165,9 +188,16 @@ function gb(b){return (b/1e9).toFixed(1)+' GB'}
 let cloneDefSeen=null,accentSeen=null,mainBefore=null;
 // Settings > Voices choices show up on the main add row right away (Save still stores them as the default; Cancel undoes)
 function liveCloneDefaults(){if(!(S&&S.clone&&S.clone.state==='ready'))return;
+ const vn=document.getElementById('s_clone_voice_narrator').value,vd=document.getElementById('s_clone_voice_dialogue').value;
+ if((vn||vd)&&!document.getElementById('s_clone_default').checked)document.getElementById('s_clone_default').checked=true;
+ setAddVoice(vn+'|'+vd);
  document.getElementById('addClone').checked=document.getElementById('s_clone_default').checked;
  document.getElementById('addAccent').value=document.getElementById('s_clone_accent').value;accentUI();if(S)renderClone(S)}
+let voiceSeen=null;
 function renderClone(s){const c=s.clone||{state:'absent'};const ready=c.state==='ready',busy=c.state==='installing'||c.state==='removing';
+ fillVoiceSelects(s);renderPlugins(s);const sv=(s.settings.clone_voice_narrator||'')+'|'+(s.settings.clone_voice_dialogue||'');
+ if(ready&&voiceSeen!==sv){setAddVoice(sv);voiceSeen=sv}if(!ready){document.getElementById('addVoice').value='|';voiceSeen=null}
+ for(const r of['narrator','dialogue'])document.getElementById('s_clone_voice_'+r).disabled=!ready;
  const ac=document.getElementById('addClone');ac.disabled=!ready;document.getElementById('addCloneL').style.opacity=ready?1:.45;
  document.getElementById('addCloneL').title=ready?'Voice new videos in the original actors\' voices (much slower)':'Install cloned voices in Settings > Voices to use this';
  if(ready&&cloneDefSeen!==s.settings.clone_default){ac.checked=!!s.settings.clone_default;cloneDefSeen=s.settings.clone_default}
@@ -179,7 +209,7 @@ function renderClone(s){const c=s.clone||{state:'absent'};const ready=c.state===
  if(!ready)dh='';
  else if(de.state==='ready')dh=`<div class="sub">German-accent model installed (${gb(de.size||0)})</div>`;
  else if(de.state==='installing')dh=`<div class="sub">Installing the German-accent model…</div><div class="bar"><i style="width:${de.pct==null?100:de.pct}%;${de.pct==null?'opacity:.35':''}"></i></div><div class="sub wrap">${esc(de.detail||'')}</div>`;
- else dh=`<div class="row"><span class="sub">${document.getElementById('s_clone_accent').value==='german'&&s.settings.clone_accent!=='german'?`German selected: the one-time ${gb(de.size||2144059741)} German-accent download starts when you click Save.`:`German accent needs a one-time ${gb(de.size||2144059741)} download (it starts by itself when you save German as the default or add a video with German).`}</span><button class="sm" onclick="post('/api/clone/install_de').then(r=>{if(!r.error)toast('Downloading the German-accent model in the background')})">${de.state==='error'?'Retry download':'Download now'}</button></div>${de.state==='error'?`<div class="sub wrap" style="color:var(--err)">${esc(de.error||'download failed')} <a href="#" onclick="native('openPath',{path:DATA+'/logs/clone_setup.log'});return false">log</a></div>`:''}`;
+ else dh=`<div class="row"><span class="sub">${document.getElementById('s_clone_accent').value==='german_v3'&&s.settings.clone_accent!=='german_v3'?`German selected: the one-time ${gb(de.size||2144059917)} German-accent download starts when you click Save.`:`German accent needs a one-time ${gb(de.size||2144059917)} download (it starts by itself when you save German as the default or add a video with German).`}</span><button class="sm" onclick="post('/api/clone/install_de').then(r=>{if(!r.error)toast('Downloading the German-accent model in the background')})">${de.state==='error'?'Retry download':'Download now'}</button></div>${de.state==='error'?`<div class="sub wrap" style="color:var(--err)">${esc(de.error||'download failed')} <a href="#" onclick="native('openPath',{path:DATA+'/logs/clone_setup.log'});return false">log</a></div>`:''}`;
  const db_=document.getElementById('deBox');if(db_._h!==dh){db_.innerHTML=dh;db_._h=dh}
  const op=document.getElementById('optin');op.checked=!!s.settings.clone_optin||busy||ready;op.disabled=busy||ready;
  document.getElementById('s_clone_default').disabled=!ready;document.getElementById('cloneDefL').style.opacity=ready?1:.45;
@@ -194,16 +224,16 @@ async function refresh(){try{const s=await api('/api/state');S=s;DATA=s.data_dir
  document.getElementById('pauseBtn').textContent=s.paused?'▶ Resume queue':'⏸ Pause queue';
  document.getElementById('pauseBtn').onclick=()=>post('/api/pause',{paused:!s.paused});
  const n=s.items.length,done=s.items.filter(i=>i.status==='done').length;document.getElementById('summary').textContent=n?`${done}/${n} done${s.paused?' · paused':''}`:'';
- document.getElementById('list').innerHTML=n?s.items.map((it,i)=>itemHTML(it,i,n)).join(''):'<div class="empty">Queue is empty. Paste URLs above or add local videos.</div>'}catch(e){}}
+ const lh=n?s.items.map((it,i)=>itemHTML(it,i,n)).join(''):'<div class="empty">Queue is empty. Paste URLs above or add local videos.</div>',le=document.getElementById('list');if(le._h!==lh){le.innerHTML=lh;le._h=lh}}catch(e){}}
 function fillVoices(id,extra){const el=document.getElementById(id);el.innerHTML=(extra||'')+VOICES.map(v=>`<option value="${v[0]}">${v[1]}</option>`).join('')}
 fillVoices('s_voice_dialogue');fillVoices('s_voice_narrator');fillVoices('s_voice_lyrics','<option value="skip">Don\'t voice (recommended)</option>');
-const FIELDS=['output_dir','voice_dialogue','voice_narrator','voice_lyrics','jp_db','duck_db','tts_db','video_codec','max_height','cookies','keep_source','clone_default','clone_accent','keep_song_vocals'];
-function openSettings(){const s=S.settings;mainBefore={clone:document.getElementById('addClone').checked,accent:document.getElementById('addAccent').value};for(const f of FIELDS){const el=document.getElementById('s_'+f);if(el.type==='checkbox')el.checked=!!s[f];else el.value=s[f]}
+const FIELDS=['output_dir','voice_dialogue','voice_narrator','voice_lyrics','jp_db','duck_db','tts_db','video_codec','max_height','cookies','keep_source','clone_default','clone_accent','keep_song_vocals','clone_voice_narrator','clone_voice_dialogue'];
+function openSettings(){const s=S.settings;mainBefore={clone:document.getElementById('addClone').checked,accent:document.getElementById('addAccent').value,voice:document.getElementById('addVoice').value||'|'};for(const f of FIELDS){const el=document.getElementById('s_'+f);if(el.type==='checkbox')el.checked=!!s[f];else el.value=s[f]}
  for(const f of['jp_db','duck_db','tts_db'])upd(f);document.getElementById('ver').textContent='Version '+S.version;show('settings')}
 function upd(f){const v=document.getElementById('s_'+f).value;document.getElementById('v_'+f).textContent=(f==='jp_db'&&Number(v)<=-41)?'Off':v+' dB';
  if(f==='jp_db'){const d=document.getElementById('s_duck_db');d.disabled=Number(v)<=-41;d.parentElement.style.opacity=d.disabled?.45:1}}
 for(const f of['jp_db','duck_db','tts_db'])document.getElementById('s_'+f).oninput=()=>upd(f);
-function closeSettings(){if(mainBefore){document.getElementById('addClone').checked=mainBefore.clone;document.getElementById('addAccent').value=mainBefore.accent;accentUI();mainBefore=null}hide('settings')}
+function closeSettings(){if(mainBefore){document.getElementById('addClone').checked=mainBefore.clone;document.getElementById('addAccent').value=mainBefore.accent;setAddVoice(mainBefore.voice);accentUI();mainBefore=null}hide('settings')}
 async function saveSettings(){const b={};for(const f of FIELDS){const el=document.getElementById('s_'+f);b[f]=el.type==='checkbox'?el.checked:(el.type==='range'||f==='max_height'?Number(el.value):el.value)}
  await post('/api/settings',b);mainBefore=null;hide('settings');toast('Settings saved (applies to items that start after this)')}
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id===t.dataset.tab))});

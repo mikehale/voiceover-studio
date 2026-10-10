@@ -52,8 +52,11 @@ def parse_args(argv=None):
                    help="voice lines with Chatterbox in the original actors' voices (much slower; Kokoro fallback per line)")
     g.add_argument('--clone-python', help='python of the venv that has chatterbox-tts installed')
     g.add_argument('--clone-device', choices=['auto', 'mps', 'cpu'], default='auto', help='Chatterbox device')
-    g.add_argument('--clone-accent', choices=['original', 'german'], default='original',
-                   help='accent of the cloned voices: original (as the reference) or german (Chatterbox Multilingual)')
+    g.add_argument('--clone-accent', choices=['original', 'german_v3'], default='original',
+                   help='accent of the cloned voices: original (as the reference) or german_v3 (Chatterbox Multilingual V3)')
+    g.add_argument('--clone-voice', action='append', default=[], metavar='ROLE=NAME|ACCENT|WAV',
+                   help="custom cloned voice for a role (narrator or dialogue) from a reference recording, e.g. "
+                        "--clone-voice 'narrator=Example Narrator|german_v3|/path/ref.wav'; ACCENT original or german_v3")
     g = ap.add_argument_group('mix levels (dB)')
     g.add_argument('--jp-db', type=_jp_level, default=None,
                    help="Japanese vocals level in dB, or 'off' (default): the vocals stem is left out of the English mix "
@@ -89,6 +92,13 @@ def parse_args(argv=None):
     a.kokoro_model = os.path.join(a.models, 'kokoro-v1.0.fp16.onnx')          # fp16 (170 MB); fp32 still accepted
     if not os.path.exists(a.kokoro_model): a.kokoro_model = os.path.join(a.models, 'kokoro-v1.0.onnx')
     a.kokoro_voices = os.path.join(a.models, 'voices-v1.0.bin')
+    a.clone_custom = {}
+    for cv in a.clone_voice:
+        role, _, spec = cv.partition('=')
+        parts = spec.split('|', 2)
+        if role.strip() not in ('narrator', 'dialogue') or len(parts) != 3:
+            ap.error(f'--clone-voice: expected narrator|dialogue=NAME|ACCENT|WAV, got {cv!r}')
+        a.clone_custom[role.strip()] = dict(name=parts[0].strip(), accent=parts[1].strip() or 'original', path=parts[2])
     return a
 
 def tsec(x):
