@@ -3,7 +3,7 @@
 # Usage: ./build_app.sh            (run from this folder; output in ./dist)
 set -euo pipefail
 cd "$(dirname "$0")"
-SRC="$PWD"; CACHE="$SRC/cache"; DIST="$SRC/dist"; APP="$DIST/Voiceover Studio.app"
+SRC="$PWD"; CACHE="$SRC/cache"; DIST="${VOICEOVER_DIST_DIR:-$SRC/dist}"; APP="$DIST/Voiceover Studio.app"
 UV_VER=0.12.24
 FF_BASE=https://ffmpeg.martin-riedl.de/download/macos/arm64/1789931890_9.0.2
 [ "$(uname -m)" = arm64 ] || { echo "Build on an Apple Silicon Mac"; exit 1; }
@@ -20,6 +20,7 @@ echo "== compiling shell"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin"
 xcrun swiftc -O -target arm64-apple-macos12 swift/main.swift -o "$APP/Contents/MacOS/VoiceoverStudio" \
   -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers
+xcrun swiftc -O -target arm64-apple-macos12 swift/cli.swift -o "$APP/Contents/MacOS/voiceover-studio"
 cp swift/Info.plist "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
@@ -37,6 +38,11 @@ mkdir -p "$APP/Contents/Resources/app"
 rsync -a --no-links --exclude '__pycache__' --exclude '*.pyc' --exclude '.DS_Store' \
   app/server.py app/requirements.lock app/clone-requirements.lock app/ui "$APP/Contents/Resources/app/"
 rsync -a --no-links --exclude '__pycache__' --exclude '*.pyc' --exclude 'models' pipeline "$APP/Contents/Resources/app/"
+DIRTY=false
+[ -z "$(git status --porcelain)" ] || DIRTY=true
+printf '{"commit":"%s","dirty":%s}\n' "$(git rev-parse HEAD)" "$DIRTY" > "$APP/Contents/Resources/app/build-info.json"
+mkdir -p "$APP/Contents/Resources/docs"
+cp docs/cli.md docs/benchmarking.md "$APP/Contents/Resources/docs/"
 if [ -n "$(find "$APP" -type l)" ]; then echo "ERROR: symlinks in bundle"; find "$APP" -type l; exit 1; fi
 
 echo "== icon"
@@ -48,9 +54,17 @@ done
 iconutil -c icns "$IS" -o "$APP/Contents/Resources/AppIcon.icns"; /bin/rm -rf "$IS"
 
 echo "== ad-hoc signing"
+# Finder metadata copied with source/assets is not permitted in a signed bundle.
+xattr -cr "$APP"
 codesign --force -s - "$APP/Contents/Resources/bin/uv"
+codesign --force -s - "$APP/Contents/MacOS/voiceover-studio"
 codesign --force --deep -s - "$APP"
-codesign --verify --deep --strict "$APP" && echo "signature ok (ad-hoc)"
+codesign --verify --deep --strict "$APP"
+echo "signature ok (ad-hoc)"
+
+echo "== CLI smoke test"
+"$APP/Contents/MacOS/voiceover-studio" --help >/dev/null
+"$APP/Contents/MacOS/voiceover-studio" --version
 
 echo "== dmg"
 R="$DIST/dmgroot"; mkdir -p "$R"

@@ -1,11 +1,11 @@
 # Benchmark CLI
 
-Run `python3 tools/benchmark.py --help` from a checkout. The wrapper uses the installed app's Python environments, models and bundled FFmpeg by default. It runs the checkout's pipeline code. It does not install packages or change the installed app.
+Run `voiceover-studio benchmark --help` using the command bundled with the app (see [CLI setup](cli.md)). The wrapper uses the installed app's Python environments, models and bundled FFmpeg by default. It runs the bundled pipeline code, or the checkout selected with `--repo`. It does not install packages or change the installed app.
 
 ## Full workflow
 
 ```sh
-python3 tools/benchmark.py run /absolute/path/video.mkv \
+voiceover-studio benchmark run /absolute/path/video.mkv \
   --start 120 --duration 900 --run-dir /absolute/path/results/pipeline-baseline
 ```
 
@@ -16,7 +16,7 @@ Add `--clone --accent german_v3` to include cloned voices. Use `--until ocr`, `s
 Reuse a saved `work/<item>/clone/job.json` to avoid repeating OCR and separation. The wrapper reads stem files but generates audio, references and caches in a new private directory.
 
 ```sh
-python3 tools/benchmark.py clone \
+voiceover-studio benchmark clone \
   --job '/path/to/saved/clone/job.json' --lines 320 --offset 0 \
   --run-dir /absolute/path/results/clone-baseline
 ```
@@ -31,7 +31,7 @@ Every run requires a **new** `--run-dir`. An existing path is refused rather tha
 
 Outputs:
 
-- `manifest.json`: command, workload, source commit, dirty status, Python source hashes, runtime package versions and guard limits.
+- `manifest.json`: command, workload, source commit (or bundled build commit), dirty status, Python source hashes, runtime package versions and guard limits.
 - `summary.json`: completion/abort status, elapsed time, sampled memory peaks, clone attempts, retries, fallbacks and stage timings when available.
 - `pipeline.json`: precise completed-stage timings from full/partial pipeline runs.
 - `memory.jsonl`: elapsed time, system swap/free-memory percentage and RSS of all processes in the benchmark's process group.
@@ -40,7 +40,7 @@ Outputs:
 - `cache/`: preserved intermediate files and audio for listening comparisons.
 
 ```sh
-python3 tools/benchmark.py compare /path/results/baseline /path/results/candidate
+voiceover-studio benchmark compare /path/results/baseline /path/results/candidate
 ```
 
 Comparison refuses different workloads, failed/aborted runs and initial generated-audio cache hits. Source changes are expected, but workloads must match. Source identity uses full SHA-256 hashes of Python files; media/stems are identified by absolute path, size and modification time, not a full media hash. Runtime package versions are recorded; review changes in runtime or model files before interpreting a comparison. The hardware should be idle except for normal background activity.

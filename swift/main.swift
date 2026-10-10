@@ -219,6 +219,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
         }
     }
 
+    @objc func openCommandLineGuide() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: res + "/docs/cli.md"))
+    }
+
+    @objc func installCommandLineTool() {
+        let p = Process()
+        p.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/voiceover-studio")
+        p.arguments = ["install"]
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        let alert = NSAlert()
+        do {
+            try p.run()
+            let output = pipe.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            alert.messageText = p.terminationStatus == 0 ? "Command-line tool installed" : "Could not install command-line tool"
+            alert.informativeText = String(data: output, encoding: .utf8) ?? ""
+        } catch {
+            alert.messageText = "Could not install command-line tool"
+            alert.informativeText = error.localizedDescription
+        }
+        alert.addButton(withTitle: "OK"); alert.runModal()
+    }
+
     func buildMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem(); main.addItem(appItem)
@@ -243,7 +266,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNa
         wm.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         wm.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         winItem.submenu = wm
-        NSApp.mainMenu = main; NSApp.windowsMenu = wm
+        let helpItem = NSMenuItem(); main.addItem(helpItem)
+        let hm = NSMenu(title: "Help")
+        let guide = hm.addItem(withTitle: "Command Line Guide", action: #selector(openCommandLineGuide), keyEquivalent: "")
+        guide.target = self
+        let install = hm.addItem(withTitle: "Install Command-Line Tool…", action: #selector(installCommandLineTool), keyEquivalent: "")
+        install.target = self
+        helpItem.submenu = hm
+        NSApp.mainMenu = main; NSApp.windowsMenu = wm; NSApp.helpMenu = hm
     }
 }
 

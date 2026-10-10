@@ -106,6 +106,13 @@ To distribute without the Gatekeeper warning you would need:
 3. Entitlements are probably not needed, because the Python runtime is downloaded later and not inside the bundle. If the app is later changed to bundle Python, it would need `com.apple.security.cs.allow-unsigned-executable-memory` and `disable-library-validation`.
 4. To submit with `xcrun notarytool submit "Voiceover Studio.dmg" --apple-id … --team-id … --wait`, sign the dmg too, then run `xcrun stapler staple "Voiceover Studio.dmg"`.
 
-### Repeatable performance benchmarks
+### Command-line tool
 
-Use `python3 tools/benchmark.py run VIDEO --duration 900 --run-dir RESULTS` to measure a pipeline sample, or `python3 tools/benchmark.py clone --job JOB_JSON --lines 320 --run-dir RESULTS` for a sustained cloning sample. Runs preserve their own audio, timing and memory reports. See [the benchmark guide](docs/benchmarking.md) for comparisons, memory guards and quality checks.
+Every app build includes a native `voiceover-studio` command. Run `"/Applications/Voiceover Studio.app/Contents/MacOS/voiceover-studio" --help`, or use its `install` command to add a symlink in `~/.local/bin`.
+
+- `voiceover-studio process VIDEO -o OUTPUT` processes a local video using the app's runtime and models.
+- `voiceover-studio benchmark run VIDEO --duration 900 --run-dir RESULTS` measures a pipeline sample.
+- `voiceover-studio benchmark clone --job JOB_JSON --lines 320 --run-dir RESULTS` measures sustained cloning.
+- `voiceover-studio doctor` checks setup; `--version` reports the app version.
+
+See [the command-line guide](docs/cli.md) and [benchmark guide](docs/benchmarking.md). No source checkout or system Python is needed. Complete first-run setup in the GUI before processing.

@@ -84,7 +84,7 @@ def parse_args(argv=None):
     g.add_argument('--abitrate', default='192k')
     g.add_argument('--keep-stems', action='store_true', help='also write per-chunk English-only tracks')
     g.add_argument('--keep-temp', action='store_true', help='keep float chunk mixes after encoding')
-    g.add_argument('--force', default='', help=f'comma list of stages to recompute: {",".join(STAGES)}')
+    g.add_argument('--force', default='', help=f'comma list of stages to recompute: {",".join(s for s in STAGES if s != "clone")}')
     g.add_argument('--until', choices=STAGES, help='stop after this stage')
     g.add_argument('--models', default=os.path.join(HERE, 'models'))
     a = ap.parse_args(argv)
