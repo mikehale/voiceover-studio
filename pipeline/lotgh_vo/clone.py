@@ -13,6 +13,7 @@ from .tts import _trim, SR
 
 CLONE_VERSION = 2
 CLONE_SEED = 1234
+MAX_WORKERS = 400              # worker restarts per run (each one generates until it nears its memory limit)
 EXAGGERATION, CFG = 0.5, 0.5
 NARRATOR_CLASSES = ('cyan',)
 SKIP_CLASSES = ('white',)        # song lyrics (if voiced at all) stay Kokoro
@@ -50,28 +51,38 @@ def run_clone(a, lines, classes, chunks, dur, wd):
     env = dict(os.environ, PYTORCH_ENABLE_MPS_FALLBACK='1', HF_HUB_OFFLINE='1', TOKENIZERS_PARALLELISM='false', TQDM_DISABLE='1')
     res, pr, info = None, None, {}
     try:
-        p = subprocess.Popen([a.clone_python, '-u', '-m', 'lotgh_vo.clone_worker', jp], stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, env=env, bufsize=1)
-        tail = []
-        for line in p.stdout:
-            line = line.rstrip()
-            if not line.startswith('CLONE '):
-                tail = (tail + [line])[-20:]; continue
-            ev = json.loads(line[6:])
-            k = ev.get('ev')
-            if k == 'log': log('clone', ev['msg'])
-            elif k == 'phase': log('clone', {'load': 'loading Chatterbox', 'speakers': 'grouping speakers'}.get(ev['name'], ev['name']))
-            elif k == 'speakers': info['speakers'] = ev['speakers']; info['lines'] = ev['lines']
-            elif k == 'gen_start':
-                log('clone', f"{ev['total'] + ev['cached']} lines, {ev['cached']} cached, {ev['total']} to generate")
-                pr = Progress('clone', ev['total'])
-            elif k == 'gen_step' and pr:
-                pr.step(extra=f"({ev['rtf']:.1f}s of compute per second of speech)" if ev.get('rtf') else '')
-            elif k == 'done': res = ev
-            elif k == 'fatal': log('clone', 'Chatterbox worker failed: ' + ev['error'].strip().splitlines()[-1][:300])
-        p.wait()
-        if p.returncode != 0 and res is None and tail:
-            log('clone', 'worker output: ' + ' | '.join(tail[-5:])[-600:])
+        # The worker restarts itself now and then to give back GPU memory (ev 'recycle'); the next one picks up the
+        # finished lines and the speaker grouping from disk. MAX_WORKERS bounds that loop.
+        for n_worker in range(MAX_WORKERS):
+            p = subprocess.Popen([a.clone_python, '-u', '-m', 'lotgh_vo.clone_worker', jp], stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, env=env, bufsize=1)
+            tail = []; recycle = None
+            for line in p.stdout:
+                line = line.rstrip()
+                if not line.startswith('CLONE '):
+                    tail = (tail + [line])[-20:]; continue
+                ev = json.loads(line[6:])
+                k = ev.get('ev')
+                if k == 'log': log('clone', ev['msg'])
+                elif k == 'phase':
+                    if not n_worker: log('clone', {'load': 'loading Chatterbox', 'speakers': 'grouping speakers'}.get(ev['name'], ev['name']))
+                elif k == 'speakers': info['speakers'] = ev['speakers']; info['lines'] = ev['lines']
+                elif k == 'gen_start':
+                    log('clone', f"{ev['total'] + ev['cached']} lines, {ev['cached']} cached, {ev['total']} to generate")
+                    if pr is None: pr = Progress('clone', ev['total'])
+                elif k == 'gen_step' and pr:
+                    pr.step(extra=f"({ev['rtf']:.1f}s of compute per second of speech)" if ev.get('rtf') else '')
+                elif k == 'recycle': recycle = ev
+                elif k == 'done': res = ev
+                elif k == 'fatal': log('clone', 'Chatterbox worker failed: ' + ev['error'].strip().splitlines()[-1][:300])
+            p.wait()
+            if recycle and p.returncode == 0 and res is None:
+                log('clone', f"restarting the Chatterbox worker to free memory ({recycle['generated']} lines done by this one, "
+                             f"{recycle['left']} left, worker at {recycle.get('mem_gb')} GB)")
+                continue
+            if p.returncode != 0 and res is None and tail:
+                log('clone', 'worker output: ' + ' | '.join(tail[-5:])[-600:])
+            break
     except Exception as e:
         log('clone', f'could not run Chatterbox ({e}); all lines use Kokoro')
     if not res:

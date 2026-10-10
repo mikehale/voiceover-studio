@@ -38,6 +38,41 @@ MAX_SPEAKERS = 8
 def emit(**kw): print('CLONE ' + json.dumps(kw), flush=True)
 def say(msg): emit(ev='log', msg=msg)
 
+# ------------------------------------------------------------------ GPU memory
+# Over a 4000-line episode the worker grew from 14 GB to 35 GB while its live tensors stayed at 5.2 GB:
+# 1. MPS keeps freed blocks cached; lines of every length fragment that cache and one long or run-on line raises it
+#    for good (driver memory 10 -> 18 GB). It is handed back whenever it holds CACHE_SLACK more than the live tensors.
+# 2. Outside that cache the process still grows ~0.2 GB per line (MPS keeps per-shape state that cannot be freed), so
+#    the worker asks to be restarted (ev 'recycle'; the parent respawns it, and finished lines and the speaker grouping
+#    come from disk) once its memory footprint passes RECYCLE_FRACTION of RAM or after RECYCLE_LINES lines.
+CACHE_SLACK = 1 << 30
+RECYCLE_LINES = 500
+RECYCLE_FRACTION = 0.55
+SPEAKERS_VERSION = 1
+def footprint_gb():
+    """This process's physical footprint in GB (what Activity Monitor shows as Memory); RSS elsewhere."""
+    try:
+        import ctypes, ctypes.util
+        lib = ctypes.CDLL(ctypes.util.find_library('proc') or '/usr/lib/libSystem.dylib')
+        buf = ctypes.create_string_buffer(512)                   # rusage_info_v0: phys_footprint at byte 72
+        if lib.proc_pid_rusage(os.getpid(), 0, buf) == 0: return int.from_bytes(buf.raw[72:80], 'little') / 2**30
+    except Exception: pass
+    import resource
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (2**30 if sys.platform == 'darwin' else 2**20)
+def ram_gb():
+    try: return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 2**30
+    except Exception: return 16.0
+def gpu_gb():
+    """(live tensors, held by the driver) in GB on MPS; (0, 0) elsewhere."""
+    import torch
+    if not torch.backends.mps.is_available(): return 0.0, 0.0
+    return torch.mps.current_allocated_memory() / 2**30, torch.mps.driver_allocated_memory() / 2**30
+def trim_gpu(force=False):
+    import gc, torch
+    if not torch.backends.mps.is_available(): return
+    cur, drv = gpu_gb()
+    if force or drv - cur > CACHE_SLACK / 2**30: gc.collect(); torch.mps.empty_cache()
+
 def pick_device(pref):
     import torch
     if pref in ('auto', 'mps') and torch.backends.mps.is_available(): return 'mps'
@@ -282,7 +317,10 @@ def custom_refs(job):
     return out
 
 def run_job(job):
-    import soundfile as sf
+    generate(job, job['lines'], *setup(job))
+
+def setup(job):
+    """Loads the models and groups the speakers; returns what generate() needs."""
     t_all = time.time()
     voc = Vocals(job['chunks']); refdir = os.path.join(job['dir'], 'refs'); gdir = os.path.join(job['dir'], 'gen')
     os.makedirs(refdir, exist_ok=True); os.makedirs(gdir, exist_ok=True)
@@ -304,6 +342,44 @@ def run_job(job):
     lines = job['lines']
     emit(ev='phase', name='speakers'); t = time.time()
     nar = [L for L in lines if L['role'] == 'narrator']; dlg = [L for L in lines if L['role'] == 'dialogue']
+    # the grouping is saved so a restarted worker (see RECYCLE_LINES) does not redo it
+    spk_path = os.path.join(job['dir'], 'speakers.json')
+    spk_key = hashlib.sha1(json.dumps([SPEAKERS_VERSION, job.get('version'), job.get('cluster_sim', 0.80), job.get('custom') or {},
+                                       job['chunks'], [[L['i'], L['s'], L['e'], L['role'], L['text']] for L in lines]]).encode()).hexdigest()
+    saved = None
+    try:
+        saved = json.load(open(spk_path))
+        if saved.get('key') != spk_key or not all(os.path.exists(r['path']) for r in saved['refs'].values() if r and r.get('hash')): saved = None
+    except Exception: saved = None
+    if saved:
+        refs = saved['refs']; cents = dict.fromkeys(saved['dialogue_speakers'])
+        for L in lines: L['spk'], L['why'], L['speech'] = saved['lines'][str(L['i'])]
+    else:
+        refs, cents = group_speakers(job, model, lines, nar, dlg, custom, voc, refdir)
+        trim_gpu(force=True)          # the fingerprinting pass leaves GBs in the MPS cache
+        atomic = spk_path + '.tmp'
+        with open(atomic, 'w') as f:
+            json.dump(dict(key=spk_key, refs=refs, dialogue_speakers=list(cents),
+                           lines={str(L['i']): [L['spk'], L['why'], L['speech']] for L in lines}), f, default=float)
+        os.replace(atomic, spk_path)
+    spk_summary = {n: dict(lines=sum(1 for L in lines if L['spk'] == n), ref=r) for n, r in refs.items()}
+    for n, s in spk_summary.items():
+        r = s['ref'] or {}
+        if r.get('custom'):
+            say(f"{n}: {s['lines']} lines, custom voice ({r.get('dur', 0):.1f}s reference recording)"); continue
+        say(f"{n}: {s['lines']} lines, reference {r.get('dur', 0):.1f}s from lines {[i + 1 for i in r.get('lines', [])]}"
+            f" (voice {r.get('snr', 0):.0f} dB over background)"
+            + ('' if r.get('hash') else ' -> too little clean speech, these lines use Kokoro'))
+    say(f"speaker grouping {'loaded from the previous worker' if saved else f'took {time.time() - t:.0f}s'} ({len(cents)} dialogue speakers + narrator"
+        + (', custom: ' + ', '.join(f"{k}={r['custom']}" for k, r in custom.items()) if custom else '') + ')')
+    emit(ev='speakers', speakers={n: dict(lines=s['lines'], ref_dur=(s['ref'] or {}).get('dur', 0),
+                                          ref_lines=(s['ref'] or {}).get('lines', []), ref_hash=(s['ref'] or {}).get('hash'))
+                                  for n, s in spk_summary.items()},
+         lines={L['i']: dict(spk=L['spk'], why=L['why'], speech=L['speech']) for L in lines})
+    return refs, model, dev, amodels, accent, lang, custom, gdir, t_all
+
+def group_speakers(job, model, lines, nar, dlg, custom, voc, refdir):
+    """Fingerprints the lines, clusters the dialogue speakers and builds each speaker's reference clip."""
     need_fp = (nar if 'narrator' not in custom else []) + (dlg if 'dialogue' not in custom else [])
     for L in lines: L.setdefault('emb', None); L.setdefault('speech', 0.0)
     if need_fp: fingerprint(model, need_fp, voc, Vocals(job['chunks'], stem=3))
@@ -322,20 +398,10 @@ def run_job(job):
             e = [L['emb'] for L in nar if L['emb'] is not None]
             refs['narrator'] = build_ref(nar, unit(np.mean(e, 0)) if e else None, refdir)
     for n, c in cents.items(): refs[n] = build_ref([L for L in dlg if L['spk'] == n], c, refdir)
-    spk_summary = {n: dict(lines=sum(1 for L in lines if L['spk'] == n), ref=r) for n, r in refs.items()}
-    for n, s in spk_summary.items():
-        r = s['ref'] or {}
-        if r.get('custom'):
-            say(f"{n}: {s['lines']} lines, custom voice ({r.get('dur', 0):.1f}s reference recording)"); continue
-        say(f"{n}: {s['lines']} lines, reference {r.get('dur', 0):.1f}s from lines {[i + 1 for i in r.get('lines', [])]}"
-            f" (voice {r.get('snr', 0):.0f} dB over background)"
-            + ('' if r.get('hash') else ' -> too little clean speech, these lines use Kokoro'))
-    say(f'speaker grouping took {time.time() - t:.0f}s ({len(cents)} dialogue speakers + narrator'
-        + (', custom: ' + ', '.join(f"{k}={r['custom']}" for k, r in custom.items()) if custom else '') + ')')
-    emit(ev='speakers', speakers={n: dict(lines=s['lines'], ref_dur=(s['ref'] or {}).get('dur', 0),
-                                          ref_lines=(s['ref'] or {}).get('lines', []), ref_hash=(s['ref'] or {}).get('hash'))
-                                  for n, s in spk_summary.items()},
-         lines={L['i']: dict(spk=L['spk'], why=L['why'], speech=L['speech']) for L in lines})
+    return refs, cents
+
+def generate(job, lines, refs, model, dev, amodels, accent, lang, custom, gdir, t_all):
+    import soundfile as sf
     # generation, grouped by speaker so each reference is prepared once
     res = {}; todo = []
     def line_accent(r):
@@ -358,7 +424,8 @@ def run_job(job):
         if cur.get(id(m)) != r['hash']: m.prepare_conditionals(r['path'], exaggeration=job['exaggeration']); cur[id(m)] = r['hash']
     def save(w, sr, out):
         sf.write(out + '.tmp.wav', w, sr, subtype='FLOAT'); os.replace(out + '.tmp.wav', out)
-    for L in sorted(todo, key=lambda L: (L['spk'], L['s'])):
+    order = sorted(todo, key=lambda L: (L['spk'], L['s'])); n_gen = 0; limit_gb = RECYCLE_FRACTION * ram_gb()
+    for k, L in enumerate(order):
         r = refs[L['spk']]; t = time.time(); d = 0.0
         if L['acc']:          # accent first; on any failure the original-accent clone, then (in the parent) Kokoro
             try:
@@ -383,8 +450,15 @@ def run_job(job):
                 if L['acc']: res[L['i']]['accent_fallback'] = True
             except Exception as e:
                 res[L['i']] = dict(error=str(e)[:300]); say(f"line {L['i'] + 1}: Chatterbox failed: {str(e)[:200]}")
-        if d: gen_t += time.time() - t; gen_a += d
+        if d: gen_t += time.time() - t; gen_a += d; n_gen += 1
         emit(ev='gen_step', done=L['i'], rtf=round(gen_t / gen_a, 2) if gen_a else None)
+        trim_gpu()
+        if n_gen and k + 1 < len(order):
+            foot = footprint_gb()
+            if n_gen >= int(job.get('recycle_lines') or RECYCLE_LINES) or foot > float(job.get('recycle_gb') or limit_gb):
+                emit(ev='recycle', generated=n_gen, left=len(order) - k - 1, mem_gb=round(foot, 1), gpu_gb=round(gpu_gb()[1], 1),
+                     rtf=round(gen_t / gen_a, 2) if gen_a else None)
+                return
     if any(L.get('acc') for L in lines): say(f"{'/'.join(sorted({L['acc'] for L in lines if L.get('acc')}))} accent: {n_acc} lines generated, {sum(1 for v in res.values() if v.get('cached') and v.get('accent'))}"
                  f' from cache, {n_acc_fb} fell back to the original accent')
     for L in lines:
