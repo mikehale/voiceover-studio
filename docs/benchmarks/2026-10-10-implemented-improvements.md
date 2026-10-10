@@ -24,4 +24,4 @@ The generated line from the implemented six-step clone path contained 108,480 sa
 
 The earlier controlled small-sample comparisons established approximately 25% less separation time from model reuse and 17% less preparation time from overlap. These are stage/workload-specific measurements, not a claim of equivalent whole-episode improvement.
 
-An updated app/CLI build is supplied separately. The installed app has not been replaced, and this branch has not been merged or pushed.
+The subsequent end-to-end release comparison passed; see [release validation](2026-10-10-release-validation.md).
