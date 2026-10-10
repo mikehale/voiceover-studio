@@ -265,6 +265,8 @@ def compare(a, b):
         raise ValueError('Workloads differ; refusing to present a speedup')
     if any(s['status'] != 'completed' for s in (sa, sb)):
         raise ValueError('Both runs must complete before comparing speed')
+    if ma.get('runtime') != mb.get('runtime'):
+        print('Runtime packages differ; this comparison includes those changes.')
     if any(s['cached_lines'] for s in (sa, sb)):
         raise ValueError('Generated-audio cache hits invalidate a cold comparison')
     for name in ('wall_s', 'peak_tree_rss_gib', 'peak_mps_driver_gib', 'synth_rtf_including_retries',
@@ -301,6 +303,11 @@ def main(argv=None):
         workload = {'mode': 'run', 'input': file_id(args.input), 'start': args.start,
                     'duration': args.duration, 'clone': args.clone, 'accent': args.accent,
                     'until': args.until, 'jobs': args.jobs}
+    workload['models'] = [file_id(p) for p in sorted((data / 'models').rglob('*'))
+                          if p.is_file() and p.suffix in ('.onnx', '.bin', '.safetensors', '.json', '.pt')]
+    if args.mode == 'run':
+        workload['config'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                              for p in sorted((repo / 'pipeline/config').glob('*.json'))}
     wait_start = time.monotonic()
     while competing_jobs():
         if not args.wait_idle:

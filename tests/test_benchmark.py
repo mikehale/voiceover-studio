@@ -14,6 +14,29 @@ spec.loader.exec_module(b)
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_pipeline_metrics_survive_failure_and_partial_success(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pipeline'))
+        from lotgh_vo import cli
+        def successful(args, metrics):
+            metrics['stages_s']['ocr'] = 1.25
+        def failed(args, metrics):
+            successful(args, metrics)
+            raise RuntimeError('test separation failure')
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'pipeline.json'
+            args = ['unused.mkv', '--metrics-json', str(path)]
+            with patch.object(cli, '_main', side_effect=successful):
+                cli.main(args)
+            report = json.loads(path.read_text())
+            self.assertEqual(report['status'], 'completed')
+            self.assertEqual(report['stages_s'], {'ocr': 1.25})
+            with patch.object(cli, '_main', side_effect=failed):
+                with self.assertRaisesRegex(RuntimeError, 'separation failure'):
+                    cli.main(args)
+            report = json.loads(path.read_text())
+            self.assertEqual(report['status'], 'failed')
+            self.assertEqual(report['stages_s'], {'ocr': 1.25})
+
     def test_swap_units(self):
         self.assertEqual(b.swap_bytes('total = 4G used = 3072.25M free = 1G'), int(3072.25 * 1024**2))
         with self.assertRaises(ValueError):

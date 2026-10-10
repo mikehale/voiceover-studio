@@ -3,7 +3,7 @@ import argparse, os, re, shutil, sys, time
 from .util import FFMPEG, log, probe, run, cpu_count, load_json
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STAGES = ['ocr', 'separate', 'clone', 'tts', 'mix', 'mux']          # (+ 'clone' before tts with --clone)
+STAGES = ['ocr', 'separate', 'clone', 'tts', 'mix', 'mux']
 
 
 SONG_CLASSES = ('white',)        # OP/ED lyric subtitles
@@ -88,6 +88,8 @@ def parse_args(argv=None):
     g.add_argument('--until', choices=STAGES, help='stop after this stage')
     g.add_argument('--models', default=os.path.join(HERE, 'models'))
     a = ap.parse_args(argv)
+    if a.until == 'clone' and not a.clone:
+        ap.error('--until clone requires --clone')
     a.force = {f'force_{s.strip()}' for s in a.force.split(',') if s.strip()}
     a.cpu_cores = cores
     a.kokoro_model = os.path.join(a.models, 'kokoro-v1.0.fp16.onnx')          # fp16 (170 MB); fp32 still accepted
@@ -181,7 +183,7 @@ def _main(a, metrics):
     stop = lambda s: a.until == s
     T = metrics['stages_s']
     # 1. subtitles
-    t = time.time()
+    t = time.monotonic()
     if a.srt:
         dsrt = a.srt; log('ocr', f'using provided SRT {a.srt}')
     else:
@@ -189,7 +191,7 @@ def _main(a, metrics):
         dsrt, csrt = run_ocr(a, video, info, wd)
         shutil.copy(dsrt, os.path.splitext(out)[0] + '.en.ocr.srt')
         shutil.copy(csrt, os.path.splitext(out)[0] + '.captions.srt')
-    T['ocr'] = time.time() - t
+    T['ocr'] = time.monotonic() - t
     subs = parse_srt(dsrt)
     if not a.srt and a.min_lines_per_min > 0:
         need = max(3, int(a.min_lines_per_min * info['duration'] / 60))
@@ -219,38 +221,38 @@ def _main(a, metrics):
     write_srt([[l[0], min(l[1], lines[i + 1][0]) if i + 1 < len(lines) else l[1], l[2]] for i, l in enumerate(lines)],
               os.path.splitext(out)[0] + '.voiced.srt', with_color=False)
     # 2. separation
-    t = time.time()
+    t = time.monotonic()
     from .separate import run_separation
-    chunks = run_separation(a, video, info, wd); T['separate'] = time.time() - t
+    chunks = run_separation(a, video, info, wd); T['separate'] = time.monotonic() - t
     if stop('separate'): return
     # 3. TTS (optionally cloned voices first; Kokoro for everything else)
     external = None
     if a.clone:
-        t = time.time()
+        t = time.monotonic()
         if a.clone_python and os.path.exists(a.clone_python):
             from .clone import run_clone
             external = run_clone(a, lines, classes, chunks, info['duration'], wd)
         else:
             log('clone', f'Chatterbox venv not found ({a.clone_python}); using Kokoro for every line')
-        T['clone'] = time.time() - t
+        T['clone'] = time.monotonic() - t
         metrics['cloned_lines'] = len(external or {})
         metrics['clone_fallback_lines'] = len(lines) - len(external or {})
         if stop('clone'): return
-    t = time.time()
+    t = time.monotonic()
     from .tts import run_tts
     place = run_tts(a, lines, info['duration'], wd, external) if external else run_tts(a, lines, info['duration'], wd)
-    T['tts'] = time.time() - t
+    T['tts'] = time.monotonic() - t
     if stop('tts'): return
     # 4. mix (streaming)
-    t = time.time()
+    t = time.monotonic()
     from .mix import run_mix, encode_mix, mix_cached, mux
     if mix_cached(a, chunks, place, wd):
         log('mix', 'cached')
     else:
         mix_chunks, gain = run_mix(a, chunks, place, wd)
         encode_mix(a, chunks, place, mix_chunks, gain, wd)
-    T['mix'] = time.time() - t
+    T['mix'] = time.monotonic() - t
     if stop('mix'): return
-    t = time.time()
-    mux(a, video, info, wd, out); T['mux'] = time.time() - t
+    t = time.monotonic()
+    mux(a, video, info, wd, out); T['mux'] = time.monotonic() - t
     log('done', f'{out}\n{"":17}stage times: ' + ', '.join(f'{k} {v / 60:.1f} min' for k, v in T.items()))
