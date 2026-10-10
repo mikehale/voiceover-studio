@@ -3,7 +3,7 @@ import argparse, os, re, shutil, sys, time
 from .util import FFMPEG, log, probe, run, cpu_count, load_json
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STAGES = ['ocr', 'separate', 'tts', 'mix', 'mux']          # (+ 'clone' before tts with --clone)
+STAGES = ['ocr', 'separate', 'clone', 'tts', 'mix', 'mux']          # (+ 'clone' before tts with --clone)
 
 
 SONG_CLASSES = ('white',)        # OP/ED lyric subtitles
@@ -25,6 +25,7 @@ def parse_args(argv=None):
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     ap.add_argument('input', help='video file (e.g. .webm with burned-in English subs)')
     ap.add_argument('-o', '--output', help='output video (.mp4 or .mkv); default <input>_en_voiceover.mp4')
+    ap.add_argument('--metrics-json', help='write stage timings and completion status as JSON, including partial runs')
     ap.add_argument('--workdir', help='cache dir (resumable); default <output>.work/')
     g = ap.add_argument_group('range (for samples)')
     g.add_argument('--start', type=str, help='start time (seconds or hh:mm:ss); clip is cut by stream copy')
@@ -136,6 +137,23 @@ def parse_srt(path):
 
 def main(argv=None):
     a = parse_args(argv)
+    metrics = {'status': 'running', 'stages_s': {}}
+    started = time.monotonic()
+    try:
+        _main(a, metrics)
+        metrics['status'] = 'completed'
+    except BaseException as exc:
+        metrics['status'] = 'failed'
+        metrics['error'] = str(exc)
+        raise
+    finally:
+        metrics['wall_s'] = time.monotonic() - started
+        if a.metrics_json:
+            from .util import atomic_json
+            atomic_json(os.path.abspath(a.metrics_json), metrics)
+
+
+def _main(a, metrics):
     if not os.path.exists(a.kokoro_model): sys.exit(f'Kokoro model missing in {a.models}; run ./setup.sh')
     src = os.path.abspath(a.input)
     base = os.path.splitext(src)[0]
@@ -159,8 +177,9 @@ def main(argv=None):
     info = probe(video)
     log('setup', f"{info['vcodec']} {info['width']}x{info['height']}, {info['duration'] / 60:.1f} min, "
                  f"{a.cpu_cores} perf cores, OCR jobs {a.jobs}, TTS jobs {a.tts_jobs}")
+    metrics['input_duration_s'] = info['duration']
     stop = lambda s: a.until == s
-    T = {}
+    T = metrics['stages_s']
     # 1. subtitles
     t = time.time()
     if a.srt:
@@ -194,6 +213,7 @@ def main(argv=None):
         lines.append([s, e, text, v, lang_for(v)]); classes.append(cls)
     used = {}
     for l in lines: used[l[3]] = used.get(l[3], 0) + 1
+    metrics['voiced_lines'] = len(lines)
     log('voices', f'map {vm}; voicing {len(lines)} lines {used}; skipped {skipped}')
     from .ocr import write_srt
     write_srt([[l[0], min(l[1], lines[i + 1][0]) if i + 1 < len(lines) else l[1], l[2]] for i, l in enumerate(lines)],
@@ -213,6 +233,9 @@ def main(argv=None):
         else:
             log('clone', f'Chatterbox venv not found ({a.clone_python}); using Kokoro for every line')
         T['clone'] = time.time() - t
+        metrics['cloned_lines'] = len(external or {})
+        metrics['clone_fallback_lines'] = len(lines) - len(external or {})
+        if stop('clone'): return
     t = time.time()
     from .tts import run_tts
     place = run_tts(a, lines, info['duration'], wd, external) if external else run_tts(a, lines, info['duration'], wd)

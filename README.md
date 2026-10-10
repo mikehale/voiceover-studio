@@ -105,3 +105,7 @@ To distribute without the Gatekeeper warning you would need:
 2. To sign every Mach-O inside the bundle, innermost first, with the hardened runtime and a timestamp: `uv`, `ffmpeg`, `ffprobe`, then the app itself. The command is `codesign --force --options runtime --timestamp -s "Developer ID Application: …" …`. Avoid `--deep` for the final signature.
 3. Entitlements are probably not needed, because the Python runtime is downloaded later and not inside the bundle. If the app is later changed to bundle Python, it would need `com.apple.security.cs.allow-unsigned-executable-memory` and `disable-library-validation`.
 4. To submit with `xcrun notarytool submit "Voiceover Studio.dmg" --apple-id … --team-id … --wait`, sign the dmg too, then run `xcrun stapler staple "Voiceover Studio.dmg"`.
+
+### Repeatable performance benchmarks
+
+Use `python3 tools/benchmark.py run VIDEO --duration 900 --run-dir RESULTS` to measure a pipeline sample, or `python3 tools/benchmark.py clone --job JOB_JSON --lines 320 --run-dir RESULTS` for a sustained cloning sample. Runs preserve their own audio, timing and memory reports. See [the benchmark guide](docs/benchmarking.md) for comparisons, memory guards and quality checks.
