@@ -1,0 +1,638 @@
+{
+  "small-baseline-jobs2": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 18.362372292089276,
+    "system_before": {
+      "swap_bytes": 5091759226,
+      "free_percent": 82,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 2.1979827880859375,
+    "peak_system_swap_gib": 4.742070311680436,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 81,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "ocr": 18.10508420795668
+      },
+      "input_duration_s": 62.288,
+      "wall_s": 18.232439416926354
+    }
+  },
+  "small-baseline-jobs4": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 17.906755749951117,
+    "system_before": {
+      "swap_bytes": 5091759226,
+      "free_percent": 83,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 3.028533935546875,
+    "peak_system_swap_gib": 4.742070311680436,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 81,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "ocr": 17.317217917065136
+      },
+      "input_duration_s": 62.288,
+      "wall_s": 17.378289708984084
+    }
+  },
+  "small-ocr720-jobs2": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 25.536258584004827,
+    "system_before": {
+      "swap_bytes": 5091759226,
+      "free_percent": 82,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 2.031768798828125,
+    "peak_system_swap_gib": 4.742070311680436,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 81,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "ocr": 24.96079554199241
+      },
+      "input_duration_s": 62.288,
+      "wall_s": 25.026128917001188
+    }
+  },
+  "small-ocr4fps-jobs2": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 16.83661687502172,
+    "system_before": {
+      "swap_bytes": 5083370618,
+      "free_percent": 82,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 2.07391357421875,
+    "peak_system_swap_gib": 4.734257811680436,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 81,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "ocr": 16.351349083008245
+      },
+      "input_duration_s": 62.288,
+      "wall_s": 16.41567474999465
+    }
+  },
+  "separation-baseline": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 9.18613058293704,
+    "system_before": {
+      "swap_bytes": 5083370618,
+      "free_percent": 84,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 1.0990142822265625,
+    "peak_system_swap_gib": 4.734257811680436,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 79,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "separate": 8.902016249950975
+      },
+      "chunks": 3
+    }
+  },
+  "separation-persistent-demucs": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 6.560489207971841,
+    "system_before": {
+      "swap_bytes": 5083370618,
+      "free_percent": 84,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 1.27960205078125,
+    "peak_system_swap_gib": 4.734257811680436,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 79,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "separate": 5.939302708022296
+      },
+      "chunks": 3
+    }
+  },
+  "separation-baseline-repeat1": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 8.122604083037004,
+    "system_before": {
+      "swap_bytes": 4898747842,
+      "free_percent": 83,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 1.0557098388671875,
+    "peak_system_swap_gib": 4.562314452603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 79,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "separate": 8.000912665971555
+      },
+      "chunks": 3
+    }
+  },
+  "separation-reuse-repeat1": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 6.530905625084415,
+    "system_before": {
+      "swap_bytes": 4898747842,
+      "free_percent": 84,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 1.279266357421875,
+    "peak_system_swap_gib": 4.562314452603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 79,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "separate": 5.7799302079947665
+      },
+      "chunks": 3
+    }
+  },
+  "separation-baseline-repeat2": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 8.700661499984562,
+    "system_before": {
+      "swap_bytes": 4898747842,
+      "free_percent": 84,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 1.0506744384765625,
+    "peak_system_swap_gib": 4.562314452603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 79,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "separate": 8.182965709012933
+      },
+      "chunks": 3
+    }
+  },
+  "separation-reuse-repeat2": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 6.530650625005364,
+    "system_before": {
+      "swap_bytes": 4898747842,
+      "free_percent": 83,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 1.2952728271484375,
+    "peak_system_swap_gib": 4.562314452603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 78,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "separate": 5.977592542069033
+      },
+      "chunks": 3
+    }
+  },
+  "pipeline-baseline-small": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 22.164750166935846,
+    "system_before": {
+      "swap_bytes": 5083370618,
+      "free_percent": 84,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 2.19134521484375,
+    "peak_system_swap_gib": 4.734257811680436,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 80,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "ocr": 17.370513917063363,
+        "separate": 4.1594502499792725
+      },
+      "input_duration_s": 62.288,
+      "voiced_lines": 13,
+      "wall_s": 21.58980087505188
+    }
+  },
+  "pipeline-overlap-small": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 18.447836540988646,
+    "system_before": {
+      "swap_bytes": 5074982010,
+      "free_percent": 84,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 2.53955078125,
+    "peak_system_swap_gib": 4.726445311680436,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 79,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "ocr": 17.76643454201985,
+        "separate": 4.705502249998972
+      },
+      "input_duration_s": 62.288,
+      "voiced_lines": 13,
+      "wall_s": 17.857924291980453
+    }
+  },
+  "pipeline-overlap-repeat": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 18.376702999928966,
+    "system_before": {
+      "swap_bytes": 4848416194,
+      "free_percent": 84,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 2.41424560546875,
+    "peak_system_swap_gib": 4.515439452603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 78,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "ocr": 17.777716833981685,
+        "separate": 4.452036167029291
+      },
+      "input_duration_s": 62.288,
+      "voiced_lines": 13,
+      "wall_s": 17.86803375009913
+    }
+  },
+  "pipeline-baseline-repeat": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 22.14052699995227,
+    "system_before": {
+      "swap_bytes": 4840027586,
+      "free_percent": 83,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 2.196685791015625,
+    "peak_system_swap_gib": 4.507626952603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 79,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0,
+    "pipeline": {
+      "status": "completed",
+      "stages_s": {
+        "ocr": 17.427397916908376,
+        "separate": 4.033051708014682
+      },
+      "input_duration_s": 62.288,
+      "voiced_lines": 13,
+      "wall_s": 21.52179345791228
+    }
+  },
+  "stem-equivalence": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 4.390992417000234,
+    "system_before": {
+      "swap_bytes": 4848416194,
+      "free_percent": 83,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 0.9376678466796875,
+    "peak_system_swap_gib": 4.515439452603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 79,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 0.0,
+    "peak_mps_driver_gib": 0.0,
+    "length_retries": 0
+  },
+  "clone-option-baseline-4": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 46.88771212508436,
+    "system_before": {
+      "swap_bytes": 4722587074,
+      "free_percent": 82,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 4.734710693359375,
+    "peak_system_swap_gib": 4.398251952603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 61,
+    "line_events": 4,
+    "synth_attempts": 4,
+    "synth_compute_s": 24.612968584056944,
+    "synth_audio_s_including_retries": 15.879999999999999,
+    "synth_rtf_including_retries": 1.549935049373863,
+    "generated_lines": 4,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 5.298762083053589,
+    "peak_mps_driver_gib": 12.839004516601562,
+    "length_retries": 0
+  },
+  "clone-option-cfm6-4": {
+    "status": "completed",
+    "reason": null,
+    "exit_code": 0,
+    "wall_s": 45.34076125000138,
+    "system_before": {
+      "swap_bytes": 4722587074,
+      "free_percent": 81,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 4.8863372802734375,
+    "peak_system_swap_gib": 4.398251952603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 61,
+    "line_events": 4,
+    "synth_attempts": 4,
+    "synth_compute_s": 22.918104166863486,
+    "synth_audio_s_including_retries": 15.879999999999999,
+    "synth_rtf_including_retries": 1.443205552069489,
+    "generated_lines": 4,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 5.298762083053589,
+    "peak_mps_driver_gib": 12.839004516601562,
+    "length_retries": 0
+  },
+  "clone-option-cfg0-4": {
+    "status": "aborted",
+    "reason": "system free-memory limit exceeded",
+    "exit_code": -15,
+    "wall_s": 29.31163941603154,
+    "system_before": {
+      "swap_bytes": 4714198466,
+      "free_percent": 81,
+      "tree_rss_bytes": 0,
+      "processes": []
+    },
+    "peak_tree_rss_gib": 4.6150970458984375,
+    "peak_system_swap_gib": 4.390439452603459,
+    "peak_system_swap_growth_gib": 0.0,
+    "min_system_free_percent": 56,
+    "line_events": 0,
+    "synth_attempts": 0,
+    "synth_compute_s": 0,
+    "synth_audio_s_including_retries": 0,
+    "synth_rtf_including_retries": null,
+    "generated_lines": 0,
+    "cached_lines": 0,
+    "failed_lines": 0,
+    "accent_fallback_lines": 0,
+    "worker_restarts": 0,
+    "peak_mps_live_gib": 4.969175100326538,
+    "peak_mps_driver_gib": 5.4066925048828125,
+    "length_retries": 0
+  }
+}

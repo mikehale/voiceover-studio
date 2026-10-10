@@ -69,7 +69,7 @@ def parse_args(argv=None):
                         '(merged when < 6 s apart, padded 1 s with short fades), whatever --jp-db is')
     g.add_argument('--duck-hold', type=float, default=0.15); g.add_argument('--duck-smooth', type=float, default=0.3)
     g = ap.add_argument_group('performance')
-    g.add_argument('--jobs', type=int, default=max(1, cores), help='OCR worker processes')
+    g.add_argument('--jobs', type=int, default=max(1, min(4, cores)), help='OCR worker processes (default up to 4)')
     g.add_argument('--tts-jobs', type=int, default=max(1, min(4, cores // 2)), help='Kokoro worker processes')
     g.add_argument('--device', choices=['auto', 'mps', 'cpu'], default='auto', help='Demucs device')
     g.add_argument('--onnx-provider', choices=['auto', 'coreml', 'cpu'], default='cpu',
@@ -78,6 +78,8 @@ def parse_args(argv=None):
                    help='Kokoro: CPU by default (CoreML fails on its dynamic shapes)')
     g.add_argument('--hwdec', choices=['auto', 'videotoolbox', 'none'], default='auto')
     g.add_argument('--sep-chunk', type=float, default=300, help='Demucs/mix chunk length (s); bounds RAM use')
+    g.add_argument('--sep-reuse-model', action=argparse.BooleanOptionalAction, default=True, help='reuse Demucs across chunks and release it after separation')
+    g.add_argument('--overlap-preparation', action=argparse.BooleanOptionalAction, default=True, help='overlap CPU OCR and MPS separation when memory headroom permits')
     g = ap.add_argument_group('output')
     g.add_argument('--video-codec', choices=['copy', 'h264'], default='copy',
                    help='copy keeps AV1 (QuickTime needs M3+ for AV1; use IINA/VLC or h264)')
@@ -156,6 +158,12 @@ def main(argv=None):
 
 
 def _main(a, metrics):
+    from .preparation import SeparationTask
+    with SeparationTask() as preparation:
+        _process(a, metrics, preparation)
+
+
+def _process(a, metrics, preparation):
     if not os.path.exists(a.kokoro_model): sys.exit(f'Kokoro model missing in {a.models}; run ./setup.sh')
     src = os.path.abspath(a.input)
     base = os.path.splitext(src)[0]
@@ -182,6 +190,12 @@ def _main(a, metrics):
     metrics['input_duration_s'] = info['duration']
     stop = lambda s: a.until == s
     T = metrics['stages_s']
+    from .preparation import can_overlap
+    overlapping = can_overlap(a)
+    metrics['overlap_preparation'] = overlapping
+    if overlapping:
+        log('setup', 'Overlapping CPU OCR and MPS separation')
+        preparation.start(a, video, info, wd)
     # 1. subtitles
     t = time.monotonic()
     if a.srt:
@@ -223,7 +237,10 @@ def _main(a, metrics):
     # 2. separation
     t = time.monotonic()
     from .separate import run_separation
-    chunks = run_separation(a, video, info, wd); T['separate'] = time.monotonic() - t
+    if overlapping:
+        chunks, T['separate'] = preparation.finish()
+    else:
+        chunks = run_separation(a, video, info, wd); T['separate'] = time.monotonic() - t
     if stop('separate'): return
     # 3. TTS (optionally cloned voices first; Kokoro for everything else)
     external = None

@@ -99,6 +99,20 @@ class BenchmarkTests(unittest.TestCase):
             self.assertTrue((Path(d) / 'summary.json').exists())
             self.assertIsNotNone(summary['exit_code'])
 
+    def test_swap_growth_aborts_below_absolute_limit(self):
+        limits = SimpleNamespace(max_swap_gib=8, max_rss_gib=12, min_free_percent=50,
+                                 timeout_minutes=1, interval=.01, max_swap_growth_gib=0)
+        # Existing swap can shrink; even growth below its starting level must abort.
+        samples = [dict(swap_bytes=n, tree_rss_bytes=0, free_percent=80, processes=[])
+                   for n in (4*b.GIB, 3*b.GIB, 3*b.GIB+1024)]
+        with tempfile.TemporaryDirectory() as d, patch.object(b, 'memory_sample', side_effect=samples):
+            summary = b.supervise([sys.executable, '-c', 'import time; time.sleep(60)'],
+                                  dict(b.os.environ), Path(d), limits)
+            self.assertEqual(summary['status'], 'aborted')
+            self.assertEqual(summary['reason'], 'system swap grew during benchmark')
+            self.assertGreater(summary['peak_system_swap_growth_gib'], 0)
+            self.assertIsNotNone(summary['exit_code'])
+
 
 if __name__ == '__main__':
     unittest.main()

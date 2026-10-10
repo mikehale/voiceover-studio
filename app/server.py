@@ -749,19 +749,22 @@ def voiceover(it, src, base_pct):
               'clone': 'Cloning voices (Chatterbox)',
               'mix': 'Mixing', 'mux': 'Writing video'}
     st = {'stage': 'ocr', 'pct': 0.0}
+    progress = dict.fromkeys(order, 0.0)
     def overall():
-        done = sum(weights[k] for k in order[:order.index(st['stage'])])
-        frac = done + weights[st['stage']] * st['pct'] / 100
+        frac = sum(weights[k] * progress[k] / 100 for k in order)
         return round(base_pct + (100 - base_pct) * frac, 1)
     def on_line(line):
         m = re.match(r'^\[\d+:\d+:\d+\] (\w+)\s+(.*)$', line)
         if not m: return
         stage, msg = m.group(1), m.group(2)
         if stage in weights:
-            if order.index(stage) > order.index(st['stage']): st['stage'], st['pct'] = stage, 0.0
+            if stage not in ('ocr', 'separate'):
+                for previous in order[:order.index(stage)]: progress[previous] = 100.0
+            st['stage'], st['pct'] = stage, progress[stage]
             pm = re.search(r'(\d+)/(\d+) \(\s*([\d.]+)%\)', msg)
             if pm and stage == st['stage']: st['pct'] = float(pm.group(3))
             if 'cached' in msg and stage == st['stage'] and re.search(r'\b0 to do', msg): st['pct'] = 100.0
+            progress[stage] = max(progress[stage], st['pct'])
             nl = re.search(r'(\d+) dialogue lines', msg)
             if nl: it['lines'] = int(nl.group(1))
             extra = ''

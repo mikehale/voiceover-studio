@@ -24,7 +24,58 @@ def _demucs(src, outdir, device, threads):
     r = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if r.returncode != 0: raise RuntimeError(r.stderr[-1500:])
 
+class DemucsSession:
+    """One model per separation stage, with the same settings and WAV encoding as the CLI."""
+    def __init__(self):
+        self.separator = None
+        self.device = None
+
+    def __call__(self, src, outdir, device, threads):
+        from pathlib import Path
+        import torch
+        from demucs.api import Separator, save_audio
+        if self.device != device:
+            self.close()
+        if self.separator is None:
+            if device == 'cpu' and threads:
+                torch.set_num_threads(threads)
+            self.separator = Separator(model='htdemucs', device=device, shifts=1,
+                                       overlap=0.25, progress=False)
+            self.device = device
+        _, stems = self.separator.separate_audio_file(Path(src))
+        folder = Path(outdir) / 'htdemucs' / 'src'
+        folder.mkdir(parents=True, exist_ok=True)
+        vocals = stems.pop('vocals')
+        other = torch.zeros_like(next(iter(stems.values())))
+        for stem in stems.values():
+            other += stem
+        for name, audio in (('vocals', vocals), ('no_vocals', other)):
+            save_audio(audio, str(folder / (name + '.wav')), samplerate=self.separator.samplerate,
+                       clip='rescale', as_float=False, bits_per_sample=16)
+
+    def close(self):
+        device = self.device
+        self.separator = None
+        self.device = None
+        if device is not None:
+            import gc
+            gc.collect()
+            if device == 'mps':
+                import torch
+                torch.mps.synchronize()
+                torch.mps.empty_cache()
+
+
 def run_separation(a, video, info, wd):
+    session = DemucsSession() if getattr(a, 'sep_reuse_model', False) else None
+    try:
+        return _run_separation(a, video, info, wd, session or _demucs)
+    finally:
+        if session is not None:
+            session.close()
+
+
+def _run_separation(a, video, info, wd, demucs):
     """Returns list of (t0, t1, vocals_path, no_vocals_path)."""
     dur, L, pad = info['duration'], a.sep_chunk, 5.0
     n = int(np.ceil(dur / L)); device = pick_device(a.device)
@@ -40,12 +91,16 @@ def run_separation(a, video, info, wd):
         run([FFMPEG, '-v', 'error', '-y', '-ss', f'{a0:.3f}', '-t', f'{a1 - a0:.3f}', '-i', video, '-vn',
              '-ac', '2', '-ar', str(SR), src])
         tmpd = os.path.join(d, 'demucs')
+        retry_cpu = False
         try:
-            _demucs(src, tmpd, device, a.jobs)
+            demucs(src, tmpd, device, a.jobs)
         except RuntimeError as e:
             if device == 'cpu': raise
             log('separate', f'chunk {k}: {device} failed ({str(e).strip().splitlines()[-1][:120]}), retrying on CPU')
-            _demucs(src, tmpd, 'cpu', a.jobs)
+            retry_cpu = True
+        # Leave the exception scope before retrying so its traceback cannot retain GPU tensors.
+        if retry_cpu:
+            demucs(src, tmpd, 'cpu', a.jobs)
         sd = os.path.join(tmpd, 'htdemucs', 'src')
         i0, i1 = int(round((t0 - a0) * SR)), int(round((t1 - a0) * SR))
         for name, dst in (('vocals', vp), ('no_vocals', bp)):

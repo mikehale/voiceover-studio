@@ -6,10 +6,10 @@ Run `voiceover-studio benchmark --help` using the command bundled with the app (
 
 ```sh
 voiceover-studio benchmark run /absolute/path/video.mkv \
-  --start 120 --duration 900 --run-dir /absolute/path/results/pipeline-baseline
+  --start 210 --duration 60 --run-dir /absolute/path/results/pipeline-baseline
 ```
 
-Add `--clone --accent german_v3` to include cloned voices. Use `--until ocr`, `separate`, `clone`, `tts` or `mix` to measure a partial pipeline. Video is copied by default. Start/end are seconds; the pipeline cuts on a keyframe, so the actual clip duration is recorded. Default: 15 minutes, four OCR workers. Check the actual voiced-line count; a 15-minute video is not necessarily a sufficient clone endurance test.
+Add `--clone --accent german_v3` to include cloned voices. Demucs model reuse and eligible preparation overlap are enabled by default. Use `--no-sep-reuse-model` or `--no-overlap-preparation` to compare the earlier behavior. This option is recorded in the workload; changing it intentionally prevents the strict `compare` command from treating the two configurations as identical. Review their stage timings and memory samples directly for an option experiment. Use `--until ocr`, `separate`, `clone`, `tts` or `mix` to measure a partial pipeline. Video is copied by default. Start/end are seconds; the pipeline cuts on a keyframe, so the actual clip duration is recorded. Default: one minute, two OCR workers. Check the actual voiced-line count; a 15-minute video is not necessarily a sufficient clone endurance test.
 
 ## Long cloning sample
 
@@ -21,7 +21,7 @@ voiceover-studio benchmark clone \
   --run-dir /absolute/path/results/clone-baseline
 ```
 
-The sample is 320 chronological lines by default. Speaker grouping runs on that selected sample, so its speaker references may differ from the full episode. Keep the same job, offset and line count for comparisons. Generation retains the worker's normal speaker ordering, seed, accent, retry and fallback behavior. Models are loaded cold once per worker; generation cache is cold at the beginning. Supported worker recycling re-executes a clean process and preserves this run's caches; counts and timings are aggregated across workers. A 320-line run measures sustained behavior, but will not exercise a 500-line scheduled recycle unless a memory threshold triggers one earlier. Use at least 600 lines to test that scheduled boundary.
+The sample is four chronological lines by default. The larger example above is an explicitly selected endurance test. Speaker grouping runs on that selected sample, so its speaker references may differ from the full episode. Keep the same job, offset and line count for comparisons. Generation retains the worker's normal speaker ordering, seed, accent, retry and fallback behavior. Models are loaded cold once per worker; generation cache is cold at the beginning. Supported worker recycling re-executes a clean process and preserves this run's caches; counts and timings are aggregated across workers. A 320-line run measures sustained behavior, but will not exercise a 500-line scheduled recycle unless a memory threshold triggers one earlier. Use at least 600 lines to test that scheduled boundary.
 
 Use `--repo /path/to/another/checkout` to benchmark a candidate revision with the same harness. The selected repo must support `--metrics-json` for full pipeline runs; focused clone runs work with the previous worker and the pending recycling implementation.
 
@@ -51,16 +51,16 @@ MPS live/driver peaks are **samples at event boundaries**, not guaranteed transi
 
 ## Memory guards and job contention
 
-macOS is required for memory telemetry. Default guards: system swap above 8 GiB, process-group RSS above 24 GiB, free memory below 15%, or elapsed time above 120 minutes. These stop only the benchmark's own process group and preserve diagnostics. Sampling happens every three seconds; guards cannot prevent an allocation spike between samples. Adjust using `--max-swap-gib`, `--max-rss-gib`, `--min-free-percent`, `--timeout-minutes` and `--interval`.
+macOS is required for memory telemetry. Default guards: any observed increase in system swap from its lowest sampled level, total system swap above 8 GiB, process-group RSS above 10 GiB, free memory below 60%, or elapsed time above 120 minutes. These stop only the benchmark's own process group and preserve diagnostics. Sampling happens every half second; guards cannot prevent an allocation spike between samples. For small performance comparisons, use `--interval 0.5 --max-rss-gib 10 --min-free-percent 60` and keep the default `--max-swap-growth-gib 0`. Existing swap may remain allocated from earlier activity; a run stops if its sampled use increases. Sampling cannot guarantee the operating system never swaps between samples, so use small fixed workloads and ample headroom. Adjust using `--max-swap-growth-gib`, `--max-swap-gib`, `--max-rss-gib`, `--min-free-percent`, `--timeout-minutes` and `--interval`.
 
 The wrapper refuses to start when it detects another heavy voiceover job. `--wait-idle` waits for it to finish, with a separate wait bounded by `--timeout-minutes`. It never stops another job. Missing memory telemetry stops the benchmark instead of running unmonitored.
 
 ## Acceptance protocol
 
-1. Run one 15-minute pipeline baseline and a separate 320+ line clone baseline.
+1. Start with a small fixed dialogue sample and fresh caches. Record elapsed time, memory growth and output quality; do not grow the workload to induce swapping.
 2. Change one optimization, retaining identical sample settings and generation seeds.
 3. Repeat the focused benchmark, then compare elapsed time, sampled memory, retry and fallback counts.
 4. Blind-listen to roughly 20 matching lines, including long dialogue and narration. Faster truncation or worse voices are not wins.
-5. Before accepting a memory fix, run 600+ lines through a worker-recycle boundary, followed by a full episode when practical. Repeat promising comparisons to distinguish gains from run-to-run variation.
+5. Repeat promising short comparisons in reverse order to distinguish gains from run-to-run variation. Long endurance and recycle-boundary tests are separate work, not required to screen performance options; do not start them as part of a small-sample comparison.
 
 Tests: `python3 -m unittest discover -s tests -v`. The process cleanup test needs permission to inspect/terminate its own subprocesses.

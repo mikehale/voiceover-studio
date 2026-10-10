@@ -148,6 +148,8 @@ def supervise(cmd, env, folder, limits):
     reader = threading.Thread(target=read_output, daemon=True)
     reader.start()
     samples = []
+    swap_low = before['swap_bytes']
+    peak_swap_growth = 0
     status, reason = 'completed', None
     try:
         with (folder / 'memory.jsonl').open('w') as output:
@@ -157,6 +159,11 @@ def supervise(cmd, env, folder, limits):
                 samples.append(sample)
                 output.write(json.dumps(sample) + '\n'); output.flush()
                 reason = guard_reason(sample, limits)
+                swap_low = min(swap_low, sample['swap_bytes'])
+                growth = sample['swap_bytes'] - swap_low
+                peak_swap_growth = max(peak_swap_growth, growth)
+                if growth > getattr(limits, 'max_swap_growth_gib', 0) * GIB:
+                    reason = 'system swap grew during benchmark'
                 if sample['elapsed_s'] > limits.timeout_minutes * 60:
                     reason = 'time limit exceeded'
                 if reason:
@@ -193,6 +200,7 @@ def supervise(cmd, env, folder, limits):
                'wall_s': time.monotonic() - started, 'system_before': before,
                'peak_tree_rss_gib': max((s['tree_rss_bytes'] for s in samples), default=0) / GIB,
                'peak_system_swap_gib': max((s['swap_bytes'] for s in samples), default=0) / GIB,
+               'peak_system_swap_growth_gib': peak_swap_growth / GIB,
                'min_system_free_percent': min((s['free_percent'] for s in samples), default=None),
                'line_events': len(steps), 'synth_attempts': len(synth),
                'synth_compute_s': compute, 'synth_audio_s_including_retries': audio,
@@ -223,6 +231,14 @@ def positive(value):
     return n
 
 
+def nonnegative(value):
+    import math
+    n = float(value)
+    if not math.isfinite(n) or n < 0:
+        raise argparse.ArgumentTypeError('must be finite and nonnegative')
+    return n
+
+
 def parser(default_data=None):
     ap = argparse.ArgumentParser(prog='voiceover-studio benchmark', description=__doc__)
     sub = ap.add_subparsers(dest='mode', required=True)
@@ -232,23 +248,27 @@ def parser(default_data=None):
         p.add_argument('--repo', type=Path, default=ROOT)
         p.add_argument('--data-dir', type=Path, default=default_data or runtime.data_dir())
         p.add_argument('--label', default='baseline')
-        p.add_argument('--interval', type=positive, default=3)
+        p.add_argument('--interval', type=positive, default=.5)
         p.add_argument('--max-swap-gib', type=positive, default=8)
-        p.add_argument('--max-rss-gib', type=positive, default=24)
-        p.add_argument('--min-free-percent', type=int, choices=range(0, 101), default=15, metavar='0..100')
+        p.add_argument('--max-swap-growth-gib', type=nonnegative, default=0,
+                       help='abort on swap growth from the lowest observed level; default 0')
+        p.add_argument('--max-rss-gib', type=positive, default=10)
+        p.add_argument('--min-free-percent', type=int, choices=range(0, 101), default=60, metavar='0..100')
         p.add_argument('--timeout-minutes', type=positive, default=120)
         p.add_argument('--wait-idle', action='store_true', help='wait for other voiceover GPU jobs to finish')
         if mode == 'run':
             p.add_argument('input', type=Path)
             p.add_argument('--start', type=float, default=0, help='seconds')
-            p.add_argument('--duration', type=positive, default=900, help='seconds; default 15 minutes')
+            p.add_argument('--duration', type=positive, default=60, help='seconds; default one minute')
             p.add_argument('--clone', action='store_true')
             p.add_argument('--accent', choices=['original', 'german_v3'], default='german_v3')
             p.add_argument('--until', choices=['ocr', 'separate', 'clone', 'tts', 'mix', 'mux'], default='mux')
-            p.add_argument('--jobs', type=int, default=4, help='OCR workers (bounded for memory)')
+            p.add_argument('--jobs', type=int, default=2, help='OCR workers (bounded for memory)')
+            p.add_argument('--overlap-preparation', action=argparse.BooleanOptionalAction, default=True)
+            p.add_argument('--sep-reuse-model', action=argparse.BooleanOptionalAction, default=True, help='reuse Demucs between chunks')
         else:
             p.add_argument('--job', type=Path, required=True)
-            p.add_argument('--lines', type=int, default=320)
+            p.add_argument('--lines', type=int, default=4)
             p.add_argument('--offset', type=int, default=0, help='chronological line offset')
     p = sub.add_parser('compare', help='compare two successful identical-workload runs')
     p.add_argument('baseline', type=Path)
@@ -301,6 +321,12 @@ def main(argv=None, default_data=None):
         workload = {'mode': 'run', 'input': file_id(args.input), 'start': args.start,
                     'duration': args.duration, 'clone': args.clone, 'accent': args.accent,
                     'until': args.until, 'jobs': args.jobs}
+        target_cli = (repo / 'pipeline/lotgh_vo/cli.py').read_text()
+        supported_options = {name for name in ('sep-reuse-model', 'overlap-preparation')
+                             if '--' + name in target_cli}
+        workload.update({name.replace('-', '_'): getattr(args, name.replace('-', '_'))
+                         if name in supported_options else False
+                         for name in ('sep-reuse-model', 'overlap-preparation')})
     workload['models'] = [file_id(p) for p in sorted((data / 'models').rglob('*'))
                           if p.is_file() and p.suffix in ('.onnx', '.bin', '.safetensors', '.json', '.pt')]
     if args.mode == 'run':
@@ -327,6 +353,9 @@ def main(argv=None, default_data=None):
                '--start', str(args.start), '--end', str(args.start + args.duration),
                '--models', str(data / 'models'), '--video-codec', 'copy', '--jobs', str(args.jobs),
                '--until', args.until, '--metrics-json', str(folder / 'pipeline.json')]
+        for name in sorted(supported_options):
+            enabled = getattr(args, name.replace('-', '_'))
+            cmd.append('--' + ('' if enabled else 'no-') + name)
         if args.clone:
             cmd += ['--clone', '--clone-python', str(data / 'clone-venv/bin/python'), '--clone-accent', args.accent]
     manifest = {'label': args.label, 'created_unix': time.time(), 'source': source_id(repo),
@@ -334,7 +363,7 @@ def main(argv=None, default_data=None):
                 'command': cmd, 'platform': platform.platform(), 'machine': platform.machine(),
                 'runtime': command_output([str(python), '-c',
                     'import sys,importlib.metadata as m,json; print(json.dumps(dict(python=sys.version,packages={d.metadata["Name"]:d.version for d in m.distributions()})))']),
-                'limits': {k: getattr(args, k) for k in ('max_swap_gib', 'max_rss_gib', 'min_free_percent', 'timeout_minutes', 'interval')}}
+                'limits': {k: getattr(args, k) for k in ('max_swap_gib', 'max_swap_growth_gib', 'max_rss_gib', 'min_free_percent', 'timeout_minutes', 'interval')}}
     write_json(folder / 'manifest.json', manifest)
     try:
         summary = supervise(cmd, env, folder, args)
@@ -343,7 +372,9 @@ def main(argv=None, default_data=None):
         raise
     final_source = source_id(repo)
     if final_source['source_sha256'] != manifest['source']['source_sha256']:
-        summary.update(status='invalid', reason='Python source changed during the benchmark')
+        summary['source_changed'] = True
+        if summary['status'] == 'completed':
+            summary.update(status='invalid', reason='Python source changed during the benchmark')
         write_json(folder / 'summary.json', summary)
     print(json.dumps(summary, indent=2))
     print('Results: ' + str(folder))

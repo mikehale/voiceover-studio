@@ -210,7 +210,7 @@ def run_ocr(a, video, info, wd):
         threads = 1 if provider == 'cpu' else 0
         pr = Progress('ocr', len(jobs))
         ctx = get_context('spawn')
-        with ctx.Pool(a.jobs, initializer=_init_worker, initargs=(provider, threads)) as pool:
+        with ctx.Pool(min(a.jobs, len(jobs)), initializer=_init_worker, initargs=(provider, threads)) as pool:
             for out, n in pool.imap_unordered(ocr_chunk, jobs):
                 pr.step(extra=f'(last chunk {n} OCR reads)')
     # assemble

@@ -27,6 +27,7 @@ MODEL_FILES = ['ve.safetensors', 't3_cfg.safetensors', 's3gen.safetensors', 'tok
 DE_T3 = 't3_mtl23ls_v3.safetensors'
 DE_FILES = {DE_T3: 2143989928, 'grapheme_mtl_merged_expanded_v1.json': 69989}
 ACCENTS = {'german_v3': 'de'}
+CFM_STEPS = 6
 SR_IN = 44100
 MIN_SPEECH_EMB = 0.6     # s of speech needed to fingerprint a line
 TIE_MARGIN = 0.02        # cosine margin below which the top-2 speakers count as a tie
@@ -144,6 +145,8 @@ def load_model(pref):
         if dev == 'cpu': raise
         say(f'loading on {dev.upper()} failed ({str(e)[:160]}); using CPU'); dev = 'cpu'; m = ChatterboxTTS.from_local(d, dev)
     if dev == 'cpu': torch.set_num_threads(max(1, os.cpu_count() or 4))
+    from functools import partial
+    m.s3gen.inference = partial(m.s3gen.inference, n_cfm_timesteps=CFM_STEPS)
     return m, dev
 
 # ------------------------------------------------------------------ audio helpers
@@ -266,10 +269,21 @@ def build_ref(lines, cent, path):
     return dict(lines=used, dur=round(dur, 2), hash=hsh, path=out, snr=snr)
 
 # ------------------------------------------------------------------ generation
-def gen_key(job, text, ref_hash, accent):
-    """Cache key of one generated line. The original accent keeps the v0.2.0 key so existing caches stay valid."""
+def generation_identity(job, text, ref_hash, accent):
     parts = [job['version'], text, ref_hash, job['seed'], job['exaggeration'], job['cfg']] + ([accent] if accent else [])
-    return hashlib.sha1('|'.join(map(str, parts)).encode()).hexdigest()[:16]
+    return '|'.join(map(str, parts))
+
+
+def gen_key(job, text, ref_hash, accent):
+    identity = generation_identity(job, text, ref_hash, accent)
+    return hashlib.sha1(f'cfm{CFM_STEPS}|{identity}'.encode()).hexdigest()[:16]
+
+
+def gen_seed(job, text, ref_hash, accent):
+    # Preserve the seeds used for the listening comparison while invalidating audio caches.
+    legacy = hashlib.sha1(generation_identity(job, text, ref_hash, accent).encode()).hexdigest()
+    return (job['seed'] + int(legacy[:8], 16)) % 2 ** 31
+
 
 def expected_len(text): return 0.5 + 0.065 * len(text)
 
@@ -430,7 +444,7 @@ def generate(job, lines, refs, model, dev, amodels, accent, lang, custom, gdir, 
         if L['acc']:          # accent first; on any failure the original-accent clone, then (in the parent) Kokoro
             try:
                 amodel = amodels[L['acc']]; prep(amodel, r)
-                w, sr = synth_checked(amodel, L['text'], (job['seed'] + int(L['akey'][:8], 16)) % 2 ** 31, job['exaggeration'],
+                w, sr = synth_checked(amodel, L['text'], gen_seed(job, L['text'], r['hash'], L['acc']), job['exaggeration'],
                                       job['cfg'], ACCENTS[L['acc']], f"line {L['i'] + 1} ({L['acc']})")
                 d = len(w) / sr; save(w, sr, L['aout']); n_acc += 1
                 res[L['i']] = dict(path=L['aout'], spk=L['spk'], ref=r['hash'], accent=L['acc'])
@@ -443,7 +457,7 @@ def generate(job, lines, refs, model, dev, amodels, accent, lang, custom, gdir, 
                     res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'], cached=True)
                 else:
                     prep(model, r)
-                    w, sr = synth_checked(model, L['text'], (job['seed'] + int(L['key'][:8], 16)) % 2 ** 31, job['exaggeration'],
+                    w, sr = synth_checked(model, L['text'], gen_seed(job, L['text'], r['hash'], None), job['exaggeration'],
                                           job['cfg'], None, f"line {L['i'] + 1}")
                     d += len(w) / sr; save(w, sr, L['out'])
                     res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'])
