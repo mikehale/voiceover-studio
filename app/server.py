@@ -6,7 +6,7 @@ Standard library only (it runs before the heavy dependencies are installed). The
 """
 import argparse, hashlib, json, os, re, secrets, shutil, signal, subprocess, sys, threading, time, traceback, uuid
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 APP_NAME = 'Voiceover Studio'
 VERSION = '0.4.0'
@@ -841,6 +841,25 @@ def cleanup_item(it):
 # --------------------------------------------------- HTTP --------------------------------------------------------
 TOKEN = secrets.token_urlsafe(16)
 
+LOG_TAIL = 20000            # characters shown when the log view opens (and after a reset)
+LOG_CHUNK = 512 * 1024      # most bytes returned by one incremental read
+
+def read_log(pth, offset=None):
+    """Without offset: the last LOG_TAIL characters + the byte offset to continue from. With offset: the complete
+    lines written since then + the new offset; {'reset': True} with a fresh tail when the log was truncated or
+    replaced (offset past its end) or when more was written than one read returns."""
+    try: size = os.path.getsize(pth)
+    except OSError: return {'log': '', 'offset': 0, 'reset': offset is not None}
+    try: off = int(offset) if offset is not None else None
+    except ValueError: off = None
+    with open(pth, 'rb') as f:
+        if off is None or off > size or size - off > LOG_CHUNK:
+            f.seek(max(0, size - 4 * LOG_TAIL)); txt = f.read(size - f.tell()).decode('utf-8', 'replace')[-LOG_TAIL:]
+            return {'log': txt, 'offset': size, 'reset': off is not None}
+        f.seek(off); b = f.read(size - off)
+    end = b.rfind(b'\n') + 1                     # whole lines only (never splits a line or a UTF-8 character)
+    return {'log': b[:end].decode('utf-8', 'replace'), 'offset': off + end, 'reset': False}
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _json(self, obj, code=200):
@@ -864,10 +883,9 @@ class H(BaseHTTPRequestHandler):
                                                          for v in custom_voices()],
                                        'plugin_errors': PLUGINS['errors']})
             m = re.match(r'/api/log/(\w+)$', u.path)
-            if m:
-                pth = os.path.join(P.logs, f'{m.group(1)}.log')
-                txt = open(pth, errors='replace').read()[-20000:] if os.path.exists(pth) else ''
-                return self._json({'log': txt})
+            if m:                                          # ?offset=N: only what was written since (live log view)
+                q = parse_qs(u.query)
+                return self._json(read_log(os.path.join(P.logs, f'{m.group(1)}.log'), q['offset'][0] if 'offset' in q else None))
             return self._json({'error': 'not found'}, 404)
         name = 'index.html' if u.path in ('/', '/index.html') else u.path.lstrip('/')
         fp = os.path.normpath(os.path.join(P.ui, name))

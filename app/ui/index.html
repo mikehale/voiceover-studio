@@ -116,7 +116,7 @@ label.chk{display:flex;gap:6px;align-items:center}pre{white-space:pre-wrap;font:
  </div></section>
 </div>
 <div class="sheet-foot row"><span class="mut grow" id="ver"></span><button onclick="closeSettings()">Cancel</button><button class="pri" onclick="saveSettings()">Save</button></div></div></div>
-<div class="modal" id="logm"><div class="card"><div class="row"><b class="grow" id="logt">Log</b><button onclick="hide('logm')">Close</button></div><pre id="logp"></pre></div></div>
+<div class="modal" id="logm"><div class="card"><div class="row"><b class="grow" id="logt">Log</b><button onclick="hide('logm');stopLiveLog()">Close</button></div><pre id="logp"></pre></div></div>
 <div class="toast" id="toast"></div>
 <script>
 const TOKEN=new URLSearchParams(location.search).get('t')||'';let S=null,DATA='';
@@ -178,7 +178,25 @@ function itemHTML(it,i,n){
  <div class="sub"><span class="badge b-${it.status}">${STATUS[it.status]||it.status}</span>${it.clone?'<span class="badge b-clone">Cloned voices</span>':''}${it.clone&&it.accent==='german_v3'?'<span class="badge b-accent">German accent</span>':''}${it.clone&&(it.cvoice_narrator||it.cvoice_dialogue)?`<span class="badge b-accent">${it.cvoice_narrator===it.cvoice_dialogue?'All: '+esc(cvName(it.cvoice_narrator)):[it.cvoice_narrator?'Narrator: '+esc(cvName(it.cvoice_narrator)):'',it.cvoice_dialogue?'Dialogue: '+esc(cvName(it.cvoice_dialogue)):''].filter(Boolean).join(' · ')}</span>`:''}${esc(it.message||'')}</div>
  <div class="sub">${esc(src)}${rng}${it.playlist?' · '+esc(it.playlist):''}</div>
  </div><div class="acts">${acts}</div>${(run||it.status==='done')?`<div class="bar"><i style="width:${pct}%"></i></div>`:''}</div>`}
-async function showLog(id){const r=await api('/api/log/'+id);document.getElementById('logt').textContent='Log';document.getElementById('logp').textContent=r.log||'(empty)';show('logm');const p=document.getElementById('logp');p.scrollTop=p.scrollHeight}
+// Log view: opens with the log's tail, then (while it stays open and the item is waiting or running) asks once a second
+// for the lines written since; follows new lines only while scrolled to the bottom; one last read once the item stops.
+const LIVE={id:null,off:0,timer:null,busy:false};
+function logRunning(id){const it=(S&&S.items||[]).find(i=>i.id===id);return !!it&&['queued','expanding','downloading','processing'].includes(it.status)}
+function stopLiveLog(){clearTimeout(LIVE.timer);LIVE.timer=null;LIVE.id=null}
+async function pollLog(id,last){
+ if(LIVE.id!==id||document.getElementById('logm').style.display==='none'){stopLiveLog();return}
+ const p=document.getElementById('logp');
+ try{const r=await api('/api/log/'+id+'?offset='+LIVE.off);
+  if(LIVE.id!==id)return;
+  if(r&&!r.error&&(r.reset||r.log)){const bottom=p.scrollTop+p.clientHeight>=p.scrollHeight-8;
+   if(r.reset||p.textContent==='(empty)')p.textContent=r.log||'(empty)';
+   else{p.textContent+=r.log;if(p.textContent.length>400000)p.textContent=p.textContent.slice(-300000)}
+   if(bottom)p.scrollTop=p.scrollHeight}
+  if(r&&typeof r.offset==='number')LIVE.off=r.offset}catch(e){}
+ if(last)return stopLiveLog();
+ LIVE.timer=setTimeout(()=>pollLog(id,!logRunning(id)),1000)}
+async function showLog(id){stopLiveLog();const r=await api('/api/log/'+id);document.getElementById('logt').textContent='Log';document.getElementById('logp').textContent=r.log||'(empty)';show('logm');const p=document.getElementById('logp');p.scrollTop=p.scrollHeight;
+ LIVE.id=id;LIVE.off=typeof r.offset==='number'?r.offset:0;LIVE.timer=setTimeout(()=>pollLog(id,!logRunning(id)),1000)}
 function renderSetup(st){
  const ready=st.state==='ready';document.getElementById('setup').style.display=ready?'none':'flex';if(ready||!st.steps)return;
  document.getElementById('steps').innerHTML=st.order.map(k=>{const s=st.steps[k];const ico={done:'✅',error:'❌',pending:'○',running:'<span class="spin">◐</span>'}[s.state];
