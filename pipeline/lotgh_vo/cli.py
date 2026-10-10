@@ -52,6 +52,10 @@ def parse_args(argv=None):
                    help="voice lines with Chatterbox in the original actors' voices (much slower; Kokoro fallback per line)")
     g.add_argument('--clone-python', help='python of the venv that has chatterbox-tts installed')
     g.add_argument('--clone-device', choices=['auto', 'mps', 'cpu'], default='auto', help='Chatterbox device')
+    g.add_argument('--clone-batch', type=int, default=1,
+                   help='experimental: lines of one voice generated together on the GPU (default 1 = one at a time; '
+                        'on Apple silicon batches were no faster and used much more memory); halved automatically '
+                        'when the GPU runs out of memory')
     g.add_argument('--clone-accent', choices=['original', 'german_v3'], default='original',
                    help='accent of the cloned voices: original (as the reference) or german_v3 (Chatterbox Multilingual V3)')
     g.add_argument('--clone-voice', action='append', default=[], metavar='ROLE=NAME|ACCENT|WAV',

@@ -40,7 +40,7 @@ def run_clone(a, lines, classes, chunks, dur, wd):
     if not jl: return {}
     job = dict(version=CLONE_VERSION, seed=CLONE_SEED, exaggeration=EXAGGERATION, cfg=CFG, device=a.clone_device,
                dir=cdir, lines=jl, chunks=[list(c) for c in chunks], accent=getattr(a, 'clone_accent', 'original'),
-               custom=getattr(a, 'clone_custom', None) or {})
+               custom=getattr(a, 'clone_custom', None) or {}, batch=max(1, getattr(a, 'clone_batch', 1) or 1))
     jp = os.path.join(cdir, 'job.json'); atomic_json(jp, job)
     acc = job['accent'] if job['accent'] != 'original' else ''
     for role, v in job['custom'].items():

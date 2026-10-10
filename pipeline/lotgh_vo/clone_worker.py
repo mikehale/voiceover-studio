@@ -266,6 +266,124 @@ def synth_checked(model, text, seed, exaggeration, cfg, lang=None, label=''):
         if bad_len(d, text): raise RuntimeError(f'bad output length {d:.1f}s')
     return w, sr
 
+# ------------------------------------------------------------------ batched generation
+BATCH_CHARS = 600        # max total subtitle characters in one batch (bounds the KV cache: longest line x batch size)
+
+def can_batch(model):
+    """True when the model is the Llama-based T3 with learned position embeddings that synth_batch mirrors."""
+    t3 = getattr(model, 't3', None)
+    return (t3 is not None and not getattr(t3, 'is_gpt', True) and getattr(t3.hp, 'input_pos_emb', None) == 'learned'
+            and hasattr(t3, 'tfmr') and hasattr(model, 's3gen') and getattr(model, 'conds', None) is not None)
+
+def is_oom(e):
+    s = str(e).lower()
+    return 'out of memory' in s or 'failed to allocate' in s or 'mps backend' in s and 'memory' in s
+
+def free_gpu():
+    import gc, torch
+    gc.collect()
+    if torch.backends.mps.is_available():
+        try: torch.mps.empty_cache()
+        except Exception: pass
+
+def synth_batch(model, texts, seeds, exaggeration, cfg, lang=None, temperature=0.8, min_p=0.05, top_p=1.0,
+                repetition_penalty=1.2, max_new_tokens=1000):
+    """Several lines of one voice (model.conds already prepared) in one T3 pass; S3Gen then decodes each line.
+
+    Mirrors ChatterboxTTS.generate / ChatterboxMultilingualTTS.generate + T3.inference of chatterbox-tts 0.1.7 with the
+    settings synth() uses (CFG pair per line: text row + text-zeroed row; repetition penalty 1.2; temperature 0.8;
+    min_p 0.05; top_p 1.0; up to 1000 speech tokens; English drops tokens >= 6561; German trims the last token).
+    Differences: rows are left-padded with an attention mask and per-row positions, each line samples from its own
+    CPU generator seeded with its seed, and S3Gen is reseeded per line, so a line's output depends only on its seed,
+    not on the batch it ran in, but is not bit-identical to the per-line path (another random stream). The
+    alignment-stream analyzer is not used (it is off for both models here). Returns [(wav float32, sr)] in order."""
+    import torch, torch.nn.functional as F
+    from transformers.generation.logits_process import MinPLogitsWarper, RepetitionPenaltyLogitsProcessor, TopPLogitsWarper
+    from chatterbox.models.s3tokenizer import drop_invalid_tokens
+    if not cfg or cfg <= 0: raise ValueError('synth_batch needs cfg > 0')
+    punc_norm = sys.modules[type(model).__module__].punc_norm
+    t3 = model.t3; hp = t3.hp; dev = t3.device; c = model.conds.t3
+    if float(exaggeration) != float(c.emotion_adv[0, 0, 0]): raise ValueError('reference prepared with another exaggeration')
+    B = len(texts)
+    with torch.inference_mode():
+        toks = []
+        for t in texts:
+            tt = (model.tokenizer.text_to_tokens(punc_norm(speakable(t)), language_id=lang.lower()) if lang
+                  else model.tokenizer.text_to_tokens(punc_norm(speakable(t)))).view(-1).to(dev)
+            toks.append(F.pad(F.pad(tt, (1, 0), value=hp.start_text_token), (0, 1), value=hp.stop_text_token))
+        cond = t3.prepare_conditioning(c)[0]                                          # (len_cond, D)
+        sos = torch.tensor([[hp.start_speech_token]], device=dev)
+        bos = (t3.speech_emb(sos) + t3.speech_pos_emb.get_fixed_embedding(0))[0]     # (1, D)
+        rows = []
+        for tt in toks:
+            pe = t3.text_pos_emb(tt[None])                                          # (L, D)
+            te = t3.text_emb(tt[None])[0] + pe
+            # T3.inference: prepare_input_embeds appends one start-of-speech embedding, then another BOS is added
+            rows += [torch.cat([cond, te, bos, bos]), torch.cat([cond, pe, bos, bos])]   # CFG: text row, text-zeroed row
+        L = max(r.size(0) for r in rows); R = len(rows)
+        x = torch.zeros(R, L, rows[0].size(1), dtype=rows[0].dtype, device=dev)
+        mask = torch.zeros(R, L, dtype=torch.long, device=dev)
+        for k, r in enumerate(rows): x[k, L - r.size(0):] = r; mask[k, L - r.size(0):] = 1
+        pos = (mask.cumsum(1) - 1).clamp(min=0); valid = mask.bool()
+        # custom 4D masks (True = may attend): causal over real tokens; a padding position sees only itself, so no
+        # attention row is empty (an empty row gives NaN with SDPA on MPS, which then leaks into the real rows)
+        eye = torch.eye(L, dtype=torch.bool, device=dev)
+        m4 = (torch.tril(torch.ones(L, L, dtype=torch.bool, device=dev)) & valid[:, None, :]) | eye
+        out = t3.tfmr(inputs_embeds=x, attention_mask=m4[:, None], position_ids=pos, use_cache=True, return_dict=True)
+        past = out.past_key_values; pos = pos[:, -1:]
+        rep_p = RepetitionPenaltyLogitsProcessor(penalty=float(repetition_penalty))
+        minp = MinPLogitsWarper(min_p=min_p); topp = TopPLogitsWarper(top_p=top_p)
+        gens = [torch.Generator().manual_seed(int(sd)) for sd in seeds]
+        active = list(range(B)); pred = [[] for _ in range(B)]
+        ids = torch.full((B, 1), hp.start_speech_token, dtype=torch.long, device=dev)
+        for i in range(max_new_tokens):
+            lg = t3.speech_head(out.last_hidden_state[:, -1, :])                      # (2*active, V)
+            cnd, unc = lg[0::2], lg[1::2]
+            lg = cnd + cfg * (cnd - unc)
+            lg = rep_p(ids, lg)
+            if temperature != 1.0: lg = lg / temperature
+            lg = topp(ids, minp(ids, lg))
+            probs = torch.softmax(lg.float(), dim=-1).cpu()
+            nxt = torch.cat([torch.multinomial(probs[k], 1, generator=gens[b]) for k, b in enumerate(active)])  # (A,)
+            keep = []
+            for k, b in enumerate(active):
+                pred[b].append(int(nxt[k]))
+                if int(nxt[k]) != hp.stop_speech_token: keep.append(k)
+            if not keep: break
+            nxt = nxt.to(dev)
+            if len(keep) < len(active):                                                 # drop finished lines
+                kk = torch.tensor(keep, device=dev); rk = torch.stack([2 * kk, 2 * kk + 1], 1).view(-1)
+                past.batch_select_indices(rk); valid = valid[rk]; pos = pos[rk]; ids = ids[kk]; nxt = nxt[kk]
+                active = [active[k] for k in keep]
+            ids = torch.cat([ids, nxt[:, None]], 1)
+            emb = t3.speech_emb(nxt[:, None]) + t3.speech_pos_emb.get_fixed_embedding(i + 1)   # (A, 1, D)
+            emb = emb.repeat_interleave(2, 0)
+            valid = torch.cat([valid, torch.ones_like(valid[:, :1])], 1); pos = pos + 1
+            out = t3.tfmr(inputs_embeds=emb, attention_mask=valid[:, None, None, :], position_ids=pos, past_key_values=past,
+                          use_cache=True, return_dict=True)
+            past = out.past_key_values
+        del past, out
+        res = []
+        for b in range(B):
+            st = drop_invalid_tokens(torch.tensor(pred[b], dtype=torch.long))
+            if not lang: st = st[st < 6561]
+            torch.manual_seed(int(seeds[b]))
+            wav, _ = model.s3gen.inference(speech_tokens=st.to(dev), ref_dict=model.conds.gen)
+            w = model.watermarker.apply_watermark(wav.squeeze(0).detach().cpu().numpy(), sample_rate=model.sr)
+            w = np.asarray(w, dtype=np.float32).reshape(-1)
+            if lang and len(w) > 2 * 960: w = w[:-960]
+            res.append((w, model.sr))
+    return res
+
+def make_batches(group, size, max_chars=BATCH_CHARS):
+    """Lines of one voice -> batches of up to `size` lines and `max_chars` characters, similar lengths together."""
+    out, cur, n = [], [], 0
+    for L in sorted(group, key=lambda L: len(L['text'])):
+        if cur and (len(cur) >= size or n + len(L['text']) > max_chars): out.append(cur); cur, n = [], 0
+        cur.append(L); n += len(L['text'])
+    if cur: out.append(cur)
+    return out
+
 def custom_refs(job):
     """{role: ref dict} for the user's custom voices; a missing or unreadable file is logged and skipped."""
     import soundfile as sf
@@ -358,13 +476,20 @@ def run_job(job):
         if cur.get(id(m)) != r['hash']: m.prepare_conditionals(r['path'], exaggeration=job['exaggeration']); cur[id(m)] = r['hash']
     def save(w, sr, out):
         sf.write(out + '.tmp.wav', w, sr, subtype='FLOAT'); os.replace(out + '.tmp.wav', out)
-    for L in sorted(todo, key=lambda L: (L['spk'], L['s'])):
-        r = refs[L['spk']]; t = time.time(); d = 0.0
+    def seed_of(L, acc): return (job['seed'] + int((L['akey'] if acc else L['key'])[:8], 16)) % 2 ** 31
+    def gen_line(L, pre=None):
+        """The per-line path. pre = (wav, sr) from a batch for this line's first model (accent if any), already
+        length-checked; without it the line is synthesised here (with the usual one retry)."""
+        nonlocal gen_t, gen_a, n_acc, n_acc_fb
+        r = refs[L['spk']]; t = time.time(); d = 0.0; d_pre = 0.0
         if L['acc']:          # accent first; on any failure the original-accent clone, then (in the parent) Kokoro
             try:
-                amodel = amodels[L['acc']]; prep(amodel, r)
-                w, sr = synth_checked(amodel, L['text'], (job['seed'] + int(L['akey'][:8], 16)) % 2 ** 31, job['exaggeration'],
-                                      job['cfg'], ACCENTS[L['acc']], f"line {L['i'] + 1} ({L['acc']})")
+                amodel = amodels[L['acc']]
+                if pre: w, sr = pre; d_pre = len(w) / sr
+                else:
+                    prep(amodel, r)
+                    w, sr = synth_checked(amodel, L['text'], seed_of(L, True), job['exaggeration'],
+                                          job['cfg'], ACCENTS[L['acc']], f"line {L['i'] + 1} ({L['acc']})")
                 d = len(w) / sr; save(w, sr, L['aout']); n_acc += 1
                 res[L['i']] = dict(path=L['aout'], spk=L['spk'], ref=r['hash'], accent=L['acc'])
             except Exception as e:
@@ -374,17 +499,66 @@ def run_job(job):
             try:
                 if os.path.exists(L['out']):
                     res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'], cached=True)
+                elif pre and not L['acc']:
+                    w, sr = pre; d_pre = len(w) / sr; save(w, sr, L['out'])
+                    res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'])
                 else:
                     prep(model, r)
-                    w, sr = synth_checked(model, L['text'], (job['seed'] + int(L['key'][:8], 16)) % 2 ** 31, job['exaggeration'],
+                    w, sr = synth_checked(model, L['text'], seed_of(L, False), job['exaggeration'],
                                           job['cfg'], None, f"line {L['i'] + 1}")
                     d += len(w) / sr; save(w, sr, L['out'])
                     res[L['i']] = dict(path=L['out'], spk=L['spk'], ref=r['hash'])
                 if L['acc']: res[L['i']]['accent_fallback'] = True
             except Exception as e:
                 res[L['i']] = dict(error=str(e)[:300]); say(f"line {L['i'] + 1}: Chatterbox failed: {str(e)[:200]}")
-        if d: gen_t += time.time() - t; gen_a += d
+        if d > d_pre: gen_t += time.time() - t; gen_a += d - d_pre        # batched audio is counted with its batch
         emit(ev='gen_step', done=L['i'], rtf=round(gen_t / gen_a, 2) if gen_a else None)
+    # Lines of one voice and model are generated in batches (job['batch'] lines, BATCH_CHARS characters at most);
+    # each batched line still gets the length check, and any line that fails it, or a batch that fails, goes through
+    # the per-line path above. Out of GPU memory: the batch is split and the batch size halved for the rest.
+    size = max(1, int(job.get('batch') or 1)); nb = nb_lines = nb_rejected = 0
+    groups = {}
+    for L in todo: groups.setdefault((L['spk'], L['acc'] or ''), []).append(L)
+    for (spk, acc), group in sorted(groups.items(), key=lambda kv: min(L['s'] for L in kv[1])):
+        m = amodels[acc] if acc else model
+        if size < 2 or not can_batch(m) or not job.get('cfg'):
+            for L in sorted(group, key=lambda L: L['s']): gen_line(L)
+            continue
+        queue = make_batches(group, size)
+        while queue:
+            bt = queue.pop(0)
+            if len(bt) < 2: gen_line(bt[0]); continue
+            t = time.time()
+            try:
+                prep(m, refs[spk])
+                outs = synth_batch(m, [L['text'] for L in bt], [seed_of(L, bool(acc)) for L in bt], job['exaggeration'],
+                                   job['cfg'], ACCENTS.get(acc) if acc else None,
+                                   # S3 speech tokens are 25/s: past 2.5x the expected length a line fails bad_len anyway,
+                                   # so a runaway line is cut there instead of holding the whole batch to 1000 tokens
+                                   max_new_tokens=min(1000, int(25 * (2.5 * max(expected_len(L['text']) for L in bt) + 1))))
+            except Exception as e:
+                free_gpu()
+                if is_oom(e) and len(bt) > 1:
+                    size = max(1, len(bt) // 2)
+                    say(f'batch of {len(bt)} lines ran out of GPU memory; batch size now {size}')
+                    rest = bt + [L for q in queue for L in q]
+                    queue = make_batches(rest, size) if size > 1 else [[L] for L in rest]
+                    continue
+                say(f'batch of {len(bt)} lines failed ({type(e).__name__}: {str(e)[:160]}); generating them one by one')
+                for L in bt: gen_line(L)
+                continue
+            nb += 1; ok_a = 0.0; pres = {}
+            for L, (w, sr) in zip(bt, outs):
+                dd = len(w) / sr
+                if bad_len(dd, L['text']):
+                    nb_rejected += 1
+                    say(f"line {L['i'] + 1}{' (' + acc + ')' if acc else ''}: batched output {dd:.1f}s fails the length check; generating it on its own")
+                else: pres[L['i']] = (w, sr); ok_a += dd
+            del outs; free_gpu()      # hand the batch's KV-cache blocks back; the MPS cache otherwise grows into swap
+            gen_t += time.time() - t; gen_a += ok_a; nb_lines += len(pres)
+            for L in bt: gen_line(L, pres.get(L['i']))
+    if nb: say(f'batched generation: {nb_lines} lines in {nb} batches (batch size up to {int(job.get("batch") or 1)}), '
+               f'{nb_rejected} redone one by one')
     if any(L.get('acc') for L in lines): say(f"{'/'.join(sorted({L['acc'] for L in lines if L.get('acc')}))} accent: {n_acc} lines generated, {sum(1 for v in res.values() if v.get('cached') and v.get('accent'))}"
                  f' from cache, {n_acc_fb} fell back to the original accent')
     for L in lines:
