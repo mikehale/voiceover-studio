@@ -1,0 +1,246 @@
+{
+  "schema": 1,
+  "date": "2026-10-10T00:05:48.391318-04:00",
+  "commit": "73ed227226d82ca23faffb156ccc732ba2bb7952",
+  "source_sha256": "d45b957dfaa2b3819cf2cd107203fac8d3834451de79328318c3918c3840c535",
+  "machine": "Apple M3 Max, 36 GiB unified memory",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "runtime": {
+    "python": "3.11.17 (main, Oct  3 2026, 00:54:14) [Clang 22.1.3 ]",
+    "packages": {
+      "torch": "2.14.1",
+      "demucs": "4.1.0",
+      "kokoro-onnx": "0.6.1",
+      "onnxruntime": "1.31.0",
+      "rapidocr-onnxruntime": "1.2.3"
+    }
+  },
+  "sample": {
+    "source": "Legend of the Galactic Heroes S01P01",
+    "start_s": 150,
+    "duration_s": 10,
+    "output_duration_s": 10.0,
+    "voiced_lines": 2,
+    "voice": "bm_lewis",
+    "separation_device": "cpu",
+    "ocr_workers": 2,
+    "tts_workers": 1,
+    "clone": false,
+    "ocr_fps": 5,
+    "ocr_y0": 530,
+    "input_width": 1452,
+    "input_height": 1080,
+    "video_codec": "h264 (copied from exact pre-cut clip)",
+    "settings_sha256": {
+      "voices.json": "4957a0279d6af4149a388db6366cf89585c0dbc2540a32addd9a4f35c8f2e1b8",
+      "corrections.json": "c3b3c8e4fca8fe31f404ab13b3e0f4495a9ec7d0100789b87a7629d898b379da"
+    }
+  },
+  "timings_s": {
+    "wall": 15.922321833088063,
+    "pipeline": 15.494590917020105,
+    "ocr": 6.561300624976866,
+    "separate": 5.32783108309377,
+    "tts": 3.214772666920908,
+    "mix": 0.18421974999364465,
+    "mux": 0.14336412493139505
+  },
+  "memory": {
+    "peak_process_group_rss_gib": 1.849334716796875,
+    "system_swap_before_gib": 5.372128905728459,
+    "peak_system_swap_gib": 5.372128905728459,
+    "system_swap_growth_gib": 0,
+    "min_system_free_percent": 57,
+    "sampling_interval_s": 0.5,
+    "sample_count": 30
+  },
+  "conditions": [
+    "Fresh pipeline cache; OS file and Python bytecode caches were not flushed.",
+    "Exact clip preparation was outside the measured interval.",
+    "Another full-episode voiceover job and its clone worker were active.",
+    "RSS is sampled across the benchmark process group, not total GPU allocation.",
+    "This short standard-voice sample does not measure clone throughput or long-run memory stability."
+  ],
+  "samples": [
+    {
+      "elapsed_s": 0.03838158305734396,
+      "rss_bytes": 720896,
+      "system_swap_bytes": 5768279490,
+      "system_free_percent": 64
+    },
+    {
+      "elapsed_s": 0.5794356670230627,
+      "rss_bytes": 108380160,
+      "system_swap_bytes": 5768279490,
+      "system_free_percent": 62
+    },
+    {
+      "elapsed_s": 1.1213065420743078,
+      "rss_bytes": 240910336,
+      "system_swap_bytes": 5768279490,
+      "system_free_percent": 65
+    },
+    {
+      "elapsed_s": 1.6641934170620516,
+      "rss_bytes": 588595200,
+      "system_swap_bytes": 5759890882,
+      "system_free_percent": 65
+    },
+    {
+      "elapsed_s": 2.208996375091374,
+      "rss_bytes": 661880832,
+      "system_swap_bytes": 5759890882,
+      "system_free_percent": 62
+    },
+    {
+      "elapsed_s": 2.7548118750564754,
+      "rss_bytes": 737296384,
+      "system_swap_bytes": 5759890882,
+      "system_free_percent": 63
+    },
+    {
+      "elapsed_s": 3.297825708054006,
+      "rss_bytes": 852295680,
+      "system_swap_bytes": 5759890882,
+      "system_free_percent": 67
+    },
+    {
+      "elapsed_s": 3.841691750101745,
+      "rss_bytes": 1107918848,
+      "system_swap_bytes": 5751502274,
+      "system_free_percent": 69
+    },
+    {
+      "elapsed_s": 4.383642958011478,
+      "rss_bytes": 1117700096,
+      "system_swap_bytes": 5751502274,
+      "system_free_percent": 66
+    },
+    {
+      "elapsed_s": 4.924009083071724,
+      "rss_bytes": 1131380736,
+      "system_swap_bytes": 5751502274,
+      "system_free_percent": 65
+    },
+    {
+      "elapsed_s": 5.465363417053595,
+      "rss_bytes": 1131446272,
+      "system_swap_bytes": 5751502274,
+      "system_free_percent": 64
+    },
+    {
+      "elapsed_s": 6.0081757080042735,
+      "rss_bytes": 1131692032,
+      "system_swap_bytes": 5751502274,
+      "system_free_percent": 63
+    },
+    {
+      "elapsed_s": 6.549203125061467,
+      "rss_bytes": 1143996416,
+      "system_swap_bytes": 5751502274,
+      "system_free_percent": 62
+    },
+    {
+      "elapsed_s": 7.094067792058922,
+      "rss_bytes": 254312448,
+      "system_swap_bytes": 5751502274,
+      "system_free_percent": 63
+    },
+    {
+      "elapsed_s": 7.6462266250746325,
+      "rss_bytes": 332398592,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 59
+    },
+    {
+      "elapsed_s": 8.201991625013761,
+      "rss_bytes": 849969152,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 58
+    },
+    {
+      "elapsed_s": 8.744911917019635,
+      "rss_bytes": 1042710528,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 63
+    },
+    {
+      "elapsed_s": 9.289709125063382,
+      "rss_bytes": 1415135232,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 63
+    },
+    {
+      "elapsed_s": 9.83725416706875,
+      "rss_bytes": 1845264384,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 65
+    },
+    {
+      "elapsed_s": 10.381390875088982,
+      "rss_bytes": 1966948352,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 64
+    },
+    {
+      "elapsed_s": 10.928765583084896,
+      "rss_bytes": 1971208192,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 65
+    },
+    {
+      "elapsed_s": 11.474600125104189,
+      "rss_bytes": 1985708032,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 63
+    },
+    {
+      "elapsed_s": 12.018222750048153,
+      "rss_bytes": 136249344,
+      "system_swap_bytes": 5743113666,
+      "system_free_percent": 65
+    },
+    {
+      "elapsed_s": 12.56519841705449,
+      "rss_bytes": 425836544,
+      "system_swap_bytes": 5734725058,
+      "system_free_percent": 59
+    },
+    {
+      "elapsed_s": 13.116189083084464,
+      "rss_bytes": 483639296,
+      "system_swap_bytes": 5734725058,
+      "system_free_percent": 57
+    },
+    {
+      "elapsed_s": 13.680077208089642,
+      "rss_bytes": 517619712,
+      "system_swap_bytes": 5734725058,
+      "system_free_percent": 62
+    },
+    {
+      "elapsed_s": 14.243657167069614,
+      "rss_bytes": 577830912,
+      "system_swap_bytes": 5734725058,
+      "system_free_percent": 66
+    },
+    {
+      "elapsed_s": 14.835022833081894,
+      "rss_bytes": 578142208,
+      "system_swap_bytes": 5734725058,
+      "system_free_percent": 64
+    },
+    {
+      "elapsed_s": 15.380413333070464,
+      "rss_bytes": 152076288,
+      "system_swap_bytes": 5734725058,
+      "system_free_percent": 64
+    },
+    {
+      "elapsed_s": 15.922061000019312,
+      "rss_bytes": 0,
+      "system_swap_bytes": 5734725058,
+      "system_free_percent": 63
+    }
+  ]
+}
