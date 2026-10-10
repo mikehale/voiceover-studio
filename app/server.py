@@ -9,7 +9,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 APP_NAME = 'Voiceover Studio'
-VERSION = '0.4.0'
+VERSION = '0.4.1-dev'
 KOKORO_FILES = [
     ('kokoro-v1.0.fp16.onnx', 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.fp16.onnx', 177464787),
     ('voices-v1.0.bin', 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin', 28214398),
